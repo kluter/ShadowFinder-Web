@@ -71,9 +71,9 @@ Three cases with known answers:
 
 | Test | Date and time | Expected |
 |------|---------------|----------|
-| Manual Input: Height `10`, Shadow `8` | `2024-02-29 12:00:00 UTC` | The ring from the [Original's README](https://github.com/bellingcat/ShadowFinder) |
+| Manual Input: `Height 10`, `Shadow 8` | `2024-02-29 12:00:00 UTC` | The ring from the [Original's README](https://github.com/bellingcat/ShadowFinder) |
 | A [Sunny Seaside Image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [Result Map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
-| A [still](assets/05_03_2024_111741_shadow_test_rainbolt.png) from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41` local | the [result](assets/result_shadow_test_rainbolt.png) revealed in the video (below) |
+| A [still](assets/05_03_2024_111741_shadow_test_rainbolt.png) from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41 Local` | The [result](assets/result_shadow_test_rainbolt.png) revealed in the video (below) |
 
 Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so that is 3 May, not 5 March. Enter the wrong one and the band lands in the wrong place.
 
