@@ -6,6 +6,8 @@ ShadowFinder Web is a browser-based port of Bellingcat's [**ShadowFinder**](http
 
 No setup or accounts, nor Jupyter or Colab. Drop an image, click three points, pick a time, hit calculate. It all runs in your browser, and your photo never leaves your device.
 
+**[Try it live → kluter.github.io/ShadowFinder-Web](https://kluter.github.io/ShadowFinder-Web/)**
+
 <"PLACEHOLDER DEMO IMG / GIF">
 
 ## Standing on the shoulders of Bellingcat
