@@ -1,7 +1,6 @@
-<div align="center">
-  <h1><img src="assets/logo.svg" alt="ShadowFinder Web logo" width="28" height="28" style="vertical-align:middle; margin-right:8px;"> ShadowFinder&nbsp;Web</h1>
-  <p><em>Geolocate a photo by the length of a shadow, entirely in your browser.</em></p>
-</div>
+<h1><img src="assets/logo.svg" alt="ShadowFinder Web logo" width="28" height="28" style="vertical-align:middle; margin-right:8px;"> ShadowFinder Web</h1>
+
+**Geolocate a photo by the length of a shadow, entirely in your browser.**
 
 ShadowFinder Web is a browser-based port of Bellingcat's [**ShadowFinder**](https://github.com/bellingcat/ShadowFinder). Give it an object, the length of its shadow, and the date and time of the photo. It maps **every place on Earth** where that shadow could fall at that moment, the bright band ShadowFinder users know.
 
@@ -23,7 +22,7 @@ ShadowFinder Web removes those steps and wraps the method in a clean, guided int
 
 ## What it adds over the notebook
 
-|  | Original notebook | ShadowFinder Web |
+| Aspect | Original notebook | ShadowFinder Web |
 |---|---|---|
 | **Measuring** | a separate image tool, then paste numbers | click base, top and shadow tip on the image |
 | **Running it** | edit and run code cells | a guided five-step interface |
@@ -70,17 +69,15 @@ Three cases with known answers:
 
 | Test | Load | Date and time | Expected |
 |------|------|---------------|----------|
-| Numeric reference | **Manual input**: height `10`, shadow `8` | `2024-02-29 12:00:00 UTC` | the ring from the [original's README](https://github.com/bellingcat/ShadowFinder) |
-| Bellingcat sample | [image10.jpg](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [result map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
-| Real photo | a still from [this Rainbolt video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41` local | the location revealed in the video (below) |
+| Manual Input | Height `10`, Shadow `8` | `2024-02-29 12:00:00 UTC` | The ring from the [Original's README](https://github.com/bellingcat/ShadowFinder) |
+| Bellingcat sample | A [Sunny Seaside Image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [Result Map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
+| Real photo | A still from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41` local | the location revealed in the video (below) |
 
 Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so that is 3 May, not 5 March. Enter the wrong one and the band lands in the wrong place.
 
-<p align="center">
-  <img src="assets/05_03_2024_111741_shadow_test_rainbolt.png" alt="Test photo" width="46%">
-  &nbsp;
-  <img src="assets/result_shadow_test_rainbolt.png" alt="ShadowFinder Web result" width="46%">
-</p>
+| Test photo | ShadowFinder Web result |
+|---|---|
+| <img src="assets/05_03_2024_111741_shadow_test_rainbolt.png" alt="Test photo" width="100%"> | <img src="assets/result_shadow_test_rainbolt.png" alt="ShadowFinder Web result" width="100%"> |
 
 ## Run it locally
 
@@ -104,4 +101,4 @@ It was built with AI assistance. That is disclosed on purpose, because the [risk
 
 ## Related
 
-You may also like **[TracePoint](https://github.com/kluter/TracePoint)**, a sibling browser tool for geolocation by line-of-sight intersection, with the same dark, no-friction design.
+You may also like <img src="assets/logo_tracepoint.svg" alt="" width="16" height="16" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)**, a sibling browser tool for geolocation by line-of-sight intersection, with the same dark, no-friction design.
