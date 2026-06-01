@@ -14,7 +14,7 @@ No setup or accounts, nor Jupyter or Colab. Drop an image, click three points, p
 
 This project would not exist without the original [ShadowFinder](https://github.com/bellingcat/ShadowFinder), created by **Galen Reich** at Bellingcat, with contributors **Jordan Gillard**, **Thomas Ellmenreich** and **Boris Nezlobin**. They did the hard part: the science, the solar maths, and the pre-computed timezone grid. ShadowFinder Web is a faithful re-implementation of their algorithm in JS.
 
-If you use this tool in research, cite the original project. Their write-up, [*Chasing Shadows*](https://www.bellingcat.com/resources/2024/06/24/shadowfinder-tool-geolocation-shadow/), is the best way to understand the method.
+If you use this tool in research, cite the original project. Their write-up, [*Chasing Shadows*](https://www.bellingcat.com/resources/2024/08/22/shadow-geolocate-geolocation-locate-image-tool-open-source-bellingcat-measure/), is the best way to understand the method.
 
 ## Why port it?
 
@@ -61,7 +61,7 @@ These thresholds are more of a gut feeling from very little testing, and can use
 - Points within a **20% band** are drawn, brightest where the match is exact, the same band the original produces.
 - **Local mode** uses Bellingcat's `timezone_grid.json` to convert your local time to UTC at every point before computing the sun.
 
-Checked against the [original](https://github.com/bellingcat/ShadowFinder): height **10**, shadow **8**, `2024-02-29 12:00 UTC` reproduces the ring from its README.
+Checked against the [Original](https://github.com/bellingcat/ShadowFinder): height **10**, shadow **8**, `2024-02-29 12:00 UTC` reproduces the ring from its README.
 
 The one deliberate difference is the projection. The original is a static equirectangular plot; ShadowFinder Web uses an interactive **Web Mercator** map so you can zoom into satellite imagery to confirm a location. Same band, same data, just drawn on a slippy map, so it curves more toward the poles than the original's flat stripes. Matching that flat layout would mean dropping Leaflet's tiled basemaps, which are Web Mercator only.
 
