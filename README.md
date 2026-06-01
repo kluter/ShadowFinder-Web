@@ -41,9 +41,9 @@ The tool grades the object-to-shadow angle like this:
 
 | Angle, object to shadow | Verdict |
 |---|---|
-| 88 to 98 degrees | good, reliable |
-| 85 to 87, or 99 to 109 | borderline, usable |
-| under 85 or over 109 | likely wrong |
+| 88 to 98 degrees | 🟢 good, reliable |
+| 85 to 87, or 99 to 109 | 🟡 borderline, usable |
+| under 85 or over 109 | 🔴 likely wrong |
 
 These thresholds are more of a gut feeling from very little testing, and can use some refinement.
 
@@ -69,17 +69,17 @@ The one deliberate difference is the projection. The original is a static equire
 
 Three cases with known answers:
 
-| Test | Load | Date and time | Expected |
-|------|------|---------------|----------|
-| Manual Input | Height `10`, Shadow `8` | `2024-02-29 12:00:00 UTC` | The ring from the [Original's README](https://github.com/bellingcat/ShadowFinder) |
-| Bellingcat sample | A [Sunny Seaside Image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [Result Map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
-| Real photo | A still from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41` local | the location revealed in the video (below) |
+| Test | Date and time | Expected |
+|------|---------------|----------|
+| Manual Input: Height `10`, Shadow `8` | `2024-02-29 12:00:00 UTC` | The ring from the [Original's README](https://github.com/bellingcat/ShadowFinder) |
+| A [Sunny Seaside Image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [Result Map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
+| A [still](assets/05_03_2024_111741_shadow_test_rainbolt.png) from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41` local | the [result](assets/result_shadow_test_rainbolt.png) revealed in the video (below) |
 
 Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so that is 3 May, not 5 March. Enter the wrong one and the band lands in the wrong place.
 
 | Test photo | ShadowFinder Web result |
 |---|---|
-| <img src="assets/05_03_2024_111741_shadow_test_rainbolt.png" alt="Test photo" width="100%"> | <img src="assets/result_shadow_test_rainbolt.png" alt="ShadowFinder Web result" width="100%"> |
+| <img src="assets/05_03_2024_111741_shadow_test_rainbolt.png" alt="Test photo" height="240"> | <img src="assets/result_shadow_test_rainbolt.png" alt="ShadowFinder Web result" height="240"> |
 
 ## Run it locally
 
