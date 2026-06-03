@@ -10,7 +10,7 @@
 
 ---
 
-## Standing on the shoulders of Bellingcat <img src="assets/bc_logo.png" alt="Bellingcat" height="22" style="vertical-align:middle; margin-left:6px;">
+## Standing on the shoulders of Bellingcat
 
 This project would not exist without the original [ShadowFinder](https://github.com/bellingcat/ShadowFinder), created by [**Galen Reich**](https://github.com/GalenReich) at Bellingcat, with contributors **Jordan Gillard**, **Thomas Ellmenreich** and **Boris Nezlobin**. They did the hard part. `ShadowFinder Web` is a faithful re-implementation of their algorithm in JS.
 
@@ -128,14 +128,14 @@ Only Leaflet comes from a CDN; swap it for a local copy to run fully offline.
 
 It was built with AI assistance, disclosed on purpose because the [risks of opaque, AI-generated OSINT tools](https://www.dutchosintguy.com/post/vibe-coding-is-becoming-an-osint-risk) are real. The fix is not to hide it, but to keep the code readable so anyone can verify it.
 
-### Honest limitations
+### Security caveats
 
 - **Map tiles reveal the area you view.** Tile requests encode the map coordinates, so a tile server can infer where you are looking. Use a VPN if that matters.
-- **One CDN dependency.** Leaflet loads from unpkg by default; self-host it to remove the assumption.
+- **One CDN dependency.** Leaflet loads from unpkg. A compromised CDN could in theory serve malicious code, but this is highly unlikely; self-host Leaflet to rule it out entirely.
 - **Browser and OS trust.** If your browser or system is compromised, no web app can protect you.
 
 ---
 
 ## Related
 
-You may also like <img src="assets/logo_tracepoint.svg" alt="" width="16" height="16" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)**, a sibling browser tool for geolocation by line-of-sight intersection, with the same dark, no-friction design.
+You may also like <img src="assets/logo_tracepoint.svg" alt="" width="16" height="16" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)**, another browser geolocation tool of mine, this one by line-of-sight intersection, with the same dark, no-friction design.
