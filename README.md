@@ -6,7 +6,7 @@
 
 **[Try it live → kluter.github.io/ShadowFinder-Web](https://kluter.github.io/ShadowFinder-Web/)**
 
-<"PLACEHOLDER DEMO IMG / GIF">
+![ShadowFinder Web](assets/demo_screen.png)
 
 ---
 
