@@ -33,6 +33,7 @@ body {
 .brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .brand-logo { display: block; }
 .brand h1 { margin: 0; font-size: 17px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+.brand-accent { color: #ffb300; }
 
 .panel-title { margin: 0; font-size: 15px; font-weight: 600; color: #ddd; flex-shrink: 0; }
 
