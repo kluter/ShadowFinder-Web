@@ -31,9 +31,9 @@ A Google sign-in for Colab, measuring shadow pixels in a *separate* tool, and pa
 |---|---|---|
 | **Measuring** | a separate image tool, then paste numbers | click base, top and shadow tip on the image |
 | **Running it** | edit and run code cells | a guided five-step interface |
-| **Date and time** | type it in | type it in, or autofill from EXIF if present |
+| **Date and time** | type it in | type it in, or autofill from `EXIF` if present |
 | **Bad geometry** | no warning | live shadow-angle warning (experimental) |
-| **Result** | a static PNG | an interactive map (Dark, OpenStreetMap, Satellite) |
+| **Result** | a static `PNG` | an interactive map (Dark, OpenStreetMap, Satellite) |
 | **To start** | Colab and a Google sign-in | open a web page |
 
 ---
@@ -46,9 +46,9 @@ The tool grades the object-to-shadow angle like this:
 
 | Angle, object to shadow | Verdict |
 |---|---|
-| 88 to 98 degrees | 🟢 good, reliable |
-| 85 to 87, or 99 to 109 | 🟡 borderline, usable |
-| under 85 or over 109 | 🔴 likely wrong |
+| `88° to 98°` | 🟢 good, reliable |
+| `85° to 87°`, or `99° to 109°` | 🟡 borderline, usable |
+| `< 85°` or `> 109` | 🔴 likely wrong |
 
 These thresholds are experimental, set by feel rather than rigorous testing. Contributions to refine them are welcome.
 
@@ -58,7 +58,7 @@ These thresholds are experimental, set by feel rather than rigorous testing. Con
 
 1. **Drop a photo** on the left panel (or click *Browse*).
 2. **Mark three points:** the base of the object, its top, then the shadow tip.
-3. **Set the date and time** (or click *Use this date & time* from EXIF). Pick **UTC** or **Local**.
+3. **Set the date and time** (or click *Use this `date & time`* from `EXIF`). Pick **UTC** or **Local**.
 4. **Calculate.** The bright band shows every location where that shadow could occur.
 
 ---
@@ -66,11 +66,11 @@ These thresholds are experimental, set by feel rather than rigorous testing. Con
 ## How it works
 
 - Sun positions come from [SunCalc](https://github.com/mourner/suncalc), the JS equivalent of the original's `suncalc` package.
-- The world is sampled on a **0.5 degree grid** (latitude -60 to 85). Each point's sun altitude gives the expected shadow ratio `height / tan(altitude)`, compared to yours.
+- The world is sampled on a `0.5 degree grid` (latitude -60 to 85). Each point's sun altitude gives the expected shadow ratio `height / tan(altitude)`, compared to yours.
 - Points within a **20% band** are drawn, brightest where the match is exact, the same band the original produces.
 - **Local mode** uses Bellingcat's `timezone_grid.json` to convert your local time to UTC at every point before computing the sun.
 
-Checked against the [Original](https://github.com/bellingcat/ShadowFinder): height **10**, shadow **8**, `2024-02-29 12:00 UTC` reproduces the ring from its README.
+Checked against the [Original](https://github.com/bellingcat/ShadowFinder): `height 10`, `shadow 8`, `2024-02-29 12:00 UTC` reproduces the ring from its README.
 
 The one deliberate difference is the projection: the original is a static equirectangular plot, while `ShadowFinder Web` uses an interactive **Web Mercator** map you can zoom into. Same band, same data, just curved more toward the poles. A flat layout would mean dropping Leaflet's tiles, which are Web Mercator only.
 
