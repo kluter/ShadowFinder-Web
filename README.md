@@ -27,7 +27,7 @@ A Google sign-in for Colab, measuring shadow pixels in a *separate* tool, and pa
 
 ## What it adds over the notebook
 
-| Aspect | Original notebook | ShadowFinder Web |
+| Aspect | Original notebook | `ShadowFinder Web` |
 |---|---|---|
 | **Measuring** | a separate image tool, then paste numbers | click base, top and shadow tip on the image |
 | **Running it** | edit and run code cells | a guided five-step interface |
@@ -116,7 +116,7 @@ The only outbound requests are map tiles (CARTO, OpenStreetMap, Esri) and the Le
 
 ### Code and dependencies
 
-ShadowFinder Web is plain HTML, CSS, and JavaScript with no build step. Its logic lives in `js/script.js`, unminified, so what you read is what runs.
+`ShadowFinder Web` is plain HTML, CSS, and JavaScript with no build step. Its logic lives in `js/script.js`, unminified, so what you read is what runs.
 
 | Library | Loaded from | Touches your data? |
 |---|---|---|
