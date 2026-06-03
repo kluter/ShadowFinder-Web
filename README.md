@@ -2,7 +2,7 @@
 
 **Geolocate a photo by the length of a shadow, entirely in your browser.**
 
-`ShadowFinder Web` is a browser-based port of Bellingcat's [**ShadowFinder**](https://github.com/bellingcat/ShadowFinder). Give it an object, its shadow length, and the date and time, and it maps **every place on Earth** where that shadow could fall, the bright band ShadowFinder users know. No setup, accounts, Jupyter or Colab. Drop an image, mark three points, pick a time, hit calculate. No uploads. No server. Everything runs locally in your browser.
+`ShadowFinder Web` is a browser-based port of Bellingcat's [**ShadowFinder**](https://github.com/bellingcat/ShadowFinder). From an object, its shadow, and the date and time, it maps **every place on Earth** where that shadow could fall. No setup, accounts, Jupyter or Colab. Drop an image, mark three points, pick a time, hit calculate. No uploads. No server. Everything runs locally in your browser.
 
 **[Try it live → kluter.github.io/ShadowFinder-Web](https://kluter.github.io/ShadowFinder-Web/)**
 
