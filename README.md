@@ -156,4 +156,4 @@ It was built with AI assistance, disclosed on purpose because the [risks of opaq
 
 ## Related
 
-You may also like <img src="assets/logo_tracepoint.svg" alt="" width="16" height="16" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)**, another browser geolocation tool of mine, this one by line-of-sight intersection, with the same dark, no-friction design.
+You may also like <img src="assets/logo_tracepoint.svg" alt="" width="16" height="16" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)**, my other browser geolocation tool. It finds where a photo was taken by intersecting lines of sight.
