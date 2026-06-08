@@ -63,6 +63,16 @@ These thresholds are experimental, set by feel rather than rigorous testing. Con
 
 ---
 
+## Reading the result
+
+The band is **every place the shadow could fall**, a search space, not a pin.
+
+- **Brightest is the best match**, fading out toward the 20% edge.
+- Expect a long curved band (often two), not a dot; a tighter band means better input.
+- It only rules places out. Combine it with terrain, climate, and other clues to narrow down.
+
+---
+
 ## How it works
 
 - Sun positions come from [SunCalc](https://github.com/mourner/suncalc), the JS equivalent of the original's `suncalc` package.
@@ -108,11 +118,19 @@ npx serve .
 
 ---
 
-## Privacy & Transparency
+## Security & Privacy
 
 Your photo never leaves your browser. It is drawn into a canvas and its EXIF is read in memory, no upload, no server. Confirm it yourself: open DevTools (`F12`) → Network, load an image, and no request carries it. Any EXIF text is escaped before it is shown, so a crafted file cannot inject anything.
 
 The only outbound requests are map tiles (CARTO, OpenStreetMap, Esri) and the Leaflet library. The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
+
+```javascript
+// Every network request ShadowFinder Web makes:
+// GET unpkg.com/leaflet@1.9.4/...   (the map library, once)
+// GET .../tile/{z}/{x}/{y}          (map tiles)
+// GET timezone_grid.json            (local file, Local mode only)
+// No image, no coordinates, nothing else.
+```
 
 ### Code and dependencies
 
