@@ -90,7 +90,7 @@ For the full method and worked examples, see [Bellingcat's article](https://www.
 
 ## Try it yourself
 
-Three single-shadow cases with known answers:
+#### Three single-shadow cases with known answers:
 
 | Test | Date and time | Expected |
 |------|---------------|----------|
@@ -100,7 +100,7 @@ Three single-shadow cases with known answers:
 
 Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so that is 3 May, not 5 March. Enter the wrong one and the band lands in the wrong place.
 
-### Cross two shadows into an intersection
+#### Cross two shadows into an intersection
 
 One shadow gives a band that wraps the globe. Measure the **same place** at two different times and the bands cross, narrowing it toward a single spot. Two demo frames of one location, each carrying its capture time in `EXIF` (already in `UTC`):
 
