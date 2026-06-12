@@ -38,7 +38,7 @@ body {
 .panel-title { margin: 0; font-size: 15px; font-weight: 600; color: #ddd; flex-shrink: 0; }
 
 .opacity-control {
-    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto;
     height: 26px; padding: 0 10px;
     background: #1e1e1e; border: 1px solid #383838; border-radius: 4px;
 }
@@ -79,16 +79,14 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     background: #111; border-bottom: 1px solid #2a2a2a;
     flex-shrink: 0; position: relative;
 }
-#btn-new-image { flex-shrink: 0; height: 26px; }
-#btn-manual { margin-left: 8px; flex-shrink: 0; height: 26px; }
-#btn-reset { margin-left: 8px; flex-shrink: 0; height: 26px; }
-/* When the measurement pill is hidden, Manual anchors the right-aligned group */
-#step-bar:has(#measure-info[style*="none"]) #btn-manual { margin-left: auto; }
+/* pill sits alone on the left; all buttons group on the right */
+.step-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+#btn-new-image, #btn-manual, #btn-reset { flex-shrink: 0; height: 26px; }
 
 #step-pill {
     position: relative;
     display: flex; align-items: center;
-    height: 26px; min-width: 250px; margin-left: 8px;
+    height: 26px; min-width: 250px;
     background: #161616; border: 1px solid #2e2e2e;
     border-radius: 13px; overflow: hidden;
     transition: border-color 0.3s;
@@ -288,7 +286,7 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 /* ---- MEASURE INFO ---- */
 #measure-info {
     display: none; align-items: center; gap: 6px;
-    margin-left: auto; flex-shrink: 0;
+    flex-shrink: 0;
     height: 26px; padding: 0 12px;
     background: #2a1e00; border: 1px solid #ffb300;
     border-radius: 13px;
@@ -395,6 +393,36 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 }
 .layer-item:hover  { background: #222; color: #fff; }
 .layer-item.active { color: #ffb300; background: #2a1e00; }
+
+/* ---- OBSERVATIONS (map header dropdown) ---- */
+.obs-wrap { position: relative; display: flex; }
+#btn-observations {
+    height: 26px; padding: 0 10px; font-size: 11px;
+    background: #1e1e1e; border: 1px solid #383838; color: #ccc;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+#btn-observations:hover { background: #2a2a2a; color: #fff; }
+#obs-count { color: #ffb300; font-weight: 700; }
+#obs-menu {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    min-width: 210px; background: #151515;
+    border: 1px solid #2a2a2a; border-radius: 8px;
+    box-shadow: 0 4px 16px #000a; overflow: hidden; z-index: 1500;
+}
+.obs-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 8px 7px 12px; border-bottom: 1px solid #1e1e1e;
+}
+.obs-row:last-child { border-bottom: none; }
+.obs-info { display: flex; flex-direction: column; gap: 2px; }
+.obs-time { font-size: 11px; color: #bbb; font-variant-numeric: tabular-nums; }
+.obs-meas { font-size: 10px; color: #888; font-variant-numeric: tabular-nums; }
+.obs-remove {
+    background: none; border: none; color: #666;
+    font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;
+    transition: color 0.15s;
+}
+.obs-remove:hover { color: #ff5d5d; }
 
 /* ---- EXIF VIEWER ---- */
 .exif-wrap {

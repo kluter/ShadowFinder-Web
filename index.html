@@ -36,21 +36,23 @@
 
             <!-- STEP INDICATOR -->
             <div id="step-bar">
-                <button id="btn-new-image" disabled title="Clear the image and load a new one">New image</button>
                 <div id="step-pill">
                     <div id="step-fill"></div>
                     <div id="step-content">
                         <span id="step-instruction">Drop an image to begin</span>
                     </div>
                 </div>
-                <div id="measure-info" style="display:none">
-                    <span class="measure-label">H</span><span class="measure-val" id="measure-h">—</span>
-                    <span class="measure-sep">·</span>
-                    <span class="measure-label">L</span><span class="measure-val" id="measure-s">—</span>
-                    <span class="measure-anglewrap"><span class="measure-sep">·</span><span id="measure-angle" class="measure-angle" title="Angle between object and shadow">—</span></span>
+                <div class="step-actions">
+                    <div id="measure-info" style="display:none">
+                        <span class="measure-label">H</span><span class="measure-val" id="measure-h">—</span>
+                        <span class="measure-sep">·</span>
+                        <span class="measure-label">L</span><span class="measure-val" id="measure-s">—</span>
+                        <span class="measure-anglewrap"><span class="measure-sep">·</span><span id="measure-angle" class="measure-angle" title="Angle between object and shadow">—</span></span>
+                    </div>
+                    <button id="btn-manual" title="Enter height and shadow length as numbers instead of clicking">Manual input</button>
+                    <button id="btn-reset" disabled title="Clear the current points or manual input to measure again (saved bands stay)">Reset measurement</button>
+                    <button id="btn-new-image" disabled title="Clear the current measurement and start a new observation">New observation</button>
                 </div>
-                <button id="btn-manual" title="Enter height and shadow length as numbers instead of clicking">Manual input</button>
-                <button id="btn-reset" disabled title="Clear the marked points and start measuring again">Reset</button>
             </div>
 
             <div id="image-container">
@@ -99,15 +101,21 @@
         <div id="map-panel">
             <div class="panel-header">
                 <h3 class="panel-title">Possible Locations</h3>
+                <div class="opacity-control" title="Result opacity">
+                    <span class="opacity-ico">◐</span>
+                    <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85">
+                </div>
                 <button id="btn-help" title="How to use ShadowFinder Web">?</button>
             </div>
 
             <!-- DATE/TIME INPUT BAR -->
             <div id="datetime-bar">
-                <button id="btn-clear-map" disabled title="Clear map results">Clear map</button>
-                <div class="opacity-control" title="Result opacity">
-                    <span class="opacity-ico">◐</span>
-                    <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85">
+                <button id="btn-clear-map" disabled title="Clear all bands and the current measurement, and start over">Clear all</button>
+                <div class="obs-wrap" id="obs-wrap" style="display:none">
+                    <button id="btn-observations" title="Shadow observations on the map">Observations <span id="obs-count">0</span> ▾</button>
+                    <div id="obs-menu" style="display:none">
+                        <div id="obs-list"></div>
+                    </div>
                 </div>
                 <div class="dt-spacer"></div>
                 <input type="date" id="input-date" class="dt-input">
@@ -131,6 +139,7 @@
                     <li><b>Mark 3 points</b> on the image: the <b>base</b> of the object, its <b>top</b>, then the <b>tip</b> of the shadow. No photo? Use <b>Manual input</b> to type the height and shadow length directly.</li>
                     <li><b>Enter the date and time</b> the photo was taken, and pick <b>UTC</b> or <b>Local</b>.</li>
                     <li><b>Calculate</b>. A bright band appears on the map showing every location where that shadow could occur at that moment.</li>
+                    <li><b>Narrow it down</b> (optional): click <b>New observation</b>, load the same place at a different time, and mark its shadow. Each result adds a band, and where they overlap is the location. Two bands give a fix, a third resolves any ambiguity, so the tool caps it at three. Fixed webcams are ideal for this.</li>
                 </ol>
                 <div class="help-warning">
                     <span class="help-warning-icon">⚠</span>
