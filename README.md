@@ -66,7 +66,7 @@ These thresholds are experimental, set by feel rather than rigorous testing. Con
 
 ## Reading the result
 
-<img align="right" width="150" src="assets/band_legend.png" alt="Brightness legend: bright centre is the best match, fading out to the 20% edge">
+<img align="right" width="125" src="assets/band_legend.png" alt="Brightness legend: bright centre is the best match, fading out to the 20% edge">
 
 The band is **every place the shadow could fall**, a search space, not a pin.
 
