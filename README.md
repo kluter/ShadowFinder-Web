@@ -34,6 +34,7 @@ A Google sign-in for Colab, measuring shadow pixels in a *separate* tool, and pa
 | **Date and time** | type it in | type it in, or autofill from `EXIF` if present |
 | **Bad geometry** | no warning | live shadow-angle warning (experimental) |
 | **Result** | a static `PNG` | an interactive map (Dark, OpenStreetMap, Satellite) |
+| **Combining shots** | one shadow, one band | overlap several timed shots of the same place to pin it |
 | **To start** | Colab and a Google sign-in | open a web page |
 
 ---
@@ -48,7 +49,7 @@ The tool grades the object-to-shadow angle like this:
 |---|---|
 | `88° to 98°` | 🟢 good, reliable |
 | `85° to 87°`, or `99° to 109°` | 🟡 borderline, usable |
-| `< 85°` or `> 109` | 🔴 likely wrong |
+| `< 85°` or `> 109°` | 🔴 likely wrong |
 
 These thresholds are experimental, set by feel rather than rigorous testing. Contributions to refine them are welcome.
 
@@ -70,6 +71,7 @@ The band is **every place the shadow could fall**, a search space, not a pin.
 - **Brightest is the best match**, fading out toward the 20% edge.
 - Expect a long curved band (often two), not a dot; a tighter band means better input.
 - It only rules places out. Combine it with terrain, climate, and other clues to narrow down.
+- Got the same place at another time? Add it as a new observation; where the bands overlap narrows to a spot (two for a fix, a third to disambiguate).
 
 ---
 
