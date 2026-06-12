@@ -104,15 +104,14 @@ Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so
 
 One shadow gives a band that wraps the globe. Measure the **same place** at two different times and the bands cross, narrowing it toward a single spot. Two demo frames of one location, each carrying its capture time in `EXIF` (already in `UTC`):
 
-| Observation | Date and time |
-|---|---|
-| [Frame 1](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` |
-| [Frame 2](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` |
+| Observation | Date and time | Time source |
+|---|---|---|
+| [Frame 1](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
+| [Frame 2](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
 
-Load the first frame, mark its shadow and calculate. Then click **New observation**, load the second, and calculate again. The time is in each file's metadata, so you can hit **use this date & time** or type it. The bright zone where the two bands overlap is the answer:
+Load the first frame, mark its shadow and calculate. Then click **New observation**, load the second, and calculate again. The bright zone where the two bands overlap is the answer:
 
-<!-- TODO: replace with the actual overlap screenshot -->
-<img src="assets/DEMO_intersection_result.png" alt="Two shadow bands overlapping to pin one location" height="240">
+![ShadowFinder Web with two shadow bands intersecting to pin one location](assets/DEMO_intersection_result.png)
 
 ---
 
