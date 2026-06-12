@@ -146,10 +146,40 @@ new LayerSwitcher().addTo(map);
 
 let heatmapLayer = null;
 let resultOpacity = 0.85;
+let observations = [];   // each: { id, label, baseEpochMs, mode, h, s, grid, dayGrid }
+// Two observations give a fix with a two-point ambiguity; a third resolves it.
+// Beyond three, extra bands can only shrink the AND-overlap and risk excluding the
+// true spot, so the count is capped here.
+const MAX_OBS = 3;
+
+// While true, the last entry in `observations` is the "current" band being edited:
+// recalculating replaces it rather than appending. "New observation" commits it (sets
+// this false) so the next calculation starts a fresh band.
+let editingCurrent = false;
+
+// "New observation" commits the current band and starts the next, so it is only available
+// once there is a current band to commit (or an image loaded to swap), and under the cap.
+function refreshNewObsBtn() {
+    const canStartNext = (img || editingCurrent) && observations.length < MAX_OBS;
+    document.getElementById('btn-new-image').disabled = !canStartNext;
+}
+
+// "Clear all" is the global reset, so it is available the moment anything has been entered:
+// an image, marked points, manual input, a date/time, or any band on the map.
+function refreshClearAllBtn() {
+    const anything = img || observations.length || points.length ||
+        document.getElementById('input-date').value ||
+        document.getElementById('input-time').value ||
+        document.getElementById('manual-h').value ||
+        document.getElementById('manual-l').value;
+    document.getElementById('btn-clear-map').disabled = !anything;
+}
 
 function clearMap() {
+    observations = [];
     if (heatmapLayer) { map.removeLayer(heatmapLayer); heatmapLayer = null; }
-    document.getElementById('btn-clear-map').disabled = true;
+    resetInputPanel();   // full reset: clears the measurement, manual input, image, and disables
+    updateObsList();     // Reset / New observation; refreshClearAllBtn (in resetInputPanel) greys this
 }
 
 // ---- STEP INDICATOR ----
@@ -197,7 +227,8 @@ function loadImage(file) {
         canvas.style.display = 'block';
         overlay.style.display = 'none';
         document.getElementById('btn-reset').disabled = false;
-        document.getElementById('btn-new-image').disabled = false;
+        refreshNewObsBtn();
+        refreshClearAllBtn();
         setStep(2);
         enterMeasureMode();
         drawCanvas();
@@ -301,6 +332,11 @@ function exitMeasureMode() {
 
 document.getElementById('btn-reset').addEventListener('click', () => {
     points = [];
+    manualMode = false;
+    document.getElementById('btn-manual').classList.remove('active-mode');
+    document.getElementById('manual-card').style.display = 'none';
+    document.getElementById('manual-h').value = '';
+    document.getElementById('manual-l').value = '';
     exitMeasureMode();
     drawCanvas();
     document.getElementById('btn-calculate').disabled = true;
@@ -310,16 +346,22 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     document.getElementById('exif-card').style.display = 'none';
     setStickyToast(null);
     if (exifGpsMarker) { map.removeLayer(exifGpsMarker); exifGpsMarker = null; }
-    clearMap();
+    // Reset clears the current measurement only; saved observation bands stay, and the
+    // current band (if any) is still the one a re-measure + recalculate will replace.
     setStep(img ? 2 : 1);
     if (img) enterMeasureMode();
+    refreshNewObsBtn();
+    refreshClearAllBtn();
 });
 
-document.getElementById('btn-new-image').addEventListener('click', () => {
+// Resets the left input panel to a clean slate: drops the image, clears the points, manual
+// input, date/time and the measurement pill. Bands already on the map are not touched.
+function resetInputPanel() {
     img = null;
     points = [];
     currentExif = null;
     manualMode = false;
+    editingCurrent = false;
     document.getElementById('btn-manual').classList.remove('active-mode');
     document.getElementById('manual-card').style.display = 'none';
     document.getElementById('manual-h').value = '';
@@ -329,7 +371,6 @@ document.getElementById('btn-new-image').addEventListener('click', () => {
     canvas.style.display = 'none';
     overlay.style.display = '';
     document.getElementById('btn-reset').disabled = true;
-    document.getElementById('btn-new-image').disabled = true;
     document.getElementById('btn-calculate').disabled = true;
     document.getElementById('input-date').value = '';
     document.getElementById('input-time').value = '';
@@ -339,9 +380,13 @@ document.getElementById('btn-new-image').addEventListener('click', () => {
     document.getElementById('file-picker').value = '';
     setStickyToast(null);
     if (exifGpsMarker) { map.removeLayer(exifGpsMarker); exifGpsMarker = null; }
-    clearMap();
     setStep(1);
-});
+    refreshNewObsBtn();
+    refreshClearAllBtn();
+}
+
+// "New observation" commits the current band (it stays on the map) and starts the next.
+document.getElementById('btn-new-image').addEventListener('click', resetInputPanel);
 
 document.getElementById('btn-clear-map').addEventListener('click', () => {
     clearMap();
@@ -526,6 +571,7 @@ function onManualInput() {
     document.getElementById('btn-calculate').disabled = !getManualMeasurements();
     updateMeasureInfo();
     checkDateTimeStep();
+    refreshClearAllBtn();
 }
 
 document.getElementById('btn-manual').addEventListener('click', () => {
@@ -617,8 +663,10 @@ function checkDateTimeStep() {
         setStepComplete();
     }
 }
-document.getElementById('input-date').addEventListener('change', checkDateTimeStep);
-document.getElementById('input-time').addEventListener('change', checkDateTimeStep);
+// 'input' (not just 'change') so Clear all lights up as soon as a date or time is typed.
+['input-date', 'input-time'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => { checkDateTimeStep(); refreshClearAllBtn(); });
+});
 
 // ---- EXIF ----
 
@@ -839,6 +887,13 @@ document.getElementById('btn-help-close').addEventListener('click', () => {
 // ---- CALCULATE ----
 
 document.getElementById('btn-calculate').addEventListener('click', () => {
+    // Recalculating the current band (editingCurrent) is always allowed; only starting a
+    // brand-new band is capped.
+    if (!editingCurrent && observations.length >= MAX_OBS) {
+        showToast('Three observations is the most that helps. Remove one to add another.');
+        return;
+    }
+
     const dateVal = document.getElementById('input-date').value;
     const timeVal = document.getElementById('input-time').value;
 
@@ -917,9 +972,31 @@ async function runAnalysis(baseEpochMs, objectHeight, shadowLength, mode) {
             tzGrid = await loadTzGrid(new Date(baseEpochMs));
         }
         await new Promise(r => setTimeout(r, 20));
-        const result = findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid);
-        renderHeatmap(result);
-        document.getElementById('btn-clear-map').disabled = !heatmapLayer;
+        const { grid, dayGrid, count } = findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid);
+        if (!count) {
+            showToast('No matching locations found for these inputs.');
+        } else {
+            // Recalculating the current band replaces it in place; otherwise this is a new band.
+            const replacing = editingCurrent && observations.length > 0;
+            const obs = {
+                id: replacing ? observations[observations.length - 1].id : Date.now(),
+                label: formatObsLabel(baseEpochMs, mode),
+                baseEpochMs, mode, h: objectHeight, s: shadowLength, grid, dayGrid,
+            };
+            if (replacing) {
+                observations[observations.length - 1] = obs;
+            } else {
+                observations.push(obs);
+                editingCurrent = true;   // the just-added band is now the current one
+            }
+            renderBands();
+            updateObsList();
+            refreshNewObsBtn();
+            if (!replacing && observations.length === 1) map.fitBounds([[-60, -180], [85, 180]]);
+            if (observations.length >= 2 && overlapCount() === 0) {
+                showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
+            }
+        }
     } catch (err) {
         showToast('Calculation failed: ' + err.message);
     }
@@ -944,10 +1021,12 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
     const numLons = lons.length;
     const offsetMap = tzGrid?._offsetMap;
 
-    const pts = [];
+    // grid holds the match `diff` per cell (-1 = no match). One band per observation.
+    const grid = new Float32Array(lats.length * numLons).fill(-1);
     // Day/night wash only makes sense for a single UTC instant.
     // In local mode every point is at its own clock time, so skip it.
     const dayGrid = (mode === 'local') ? null : new Uint8Array(lats.length * numLons);
+    let count = 0;
 
     for (let i = 0; i < lats.length; i++) {
         for (let j = 0; j < numLons; j++) {
@@ -972,25 +1051,23 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
             const diff = Math.abs(calcShadow - shadowLength) / shadowLength;
 
             if (diff < 0.2) {
-                pts.push({ lat, lon, diff });
+                grid[i * numLons + j] = diff;
+                count++;
             }
         }
     }
 
-    return { pts, dayGrid };
+    return { grid, dayGrid, count };
 }
 
 // ---- RENDER HEATMAP ----
 
 const HeatmapLayer = L.Layer.extend({
-    initialize(result) {
-        this._grid = new Float32Array(290 * 720).fill(-1);
-        for (const { lat, lon, diff } of result.pts) {
-            const i = (lat + 60) / 0.5 | 0;
-            const j = (lon + 180) / 0.5 | 0;
-            if (i >= 0 && i < 290 && j >= 0 && j < 720) this._grid[i * 720 + j] = diff;
-        }
-        this._dayGrid = result.dayGrid || null;
+    initialize(observations) {
+        this._obs = observations;
+        // the day/night wash only makes sense for a single UTC observation
+        this._dayGrid = (observations.length === 1 && observations[0].mode !== 'local')
+            ? observations[0].dayGrid : null;
     },
     onAdd(map) {
         this._map = map;
@@ -1018,7 +1095,8 @@ const HeatmapLayer = L.Layer.extend({
         const ctx = canvas.getContext('2d');
         const img = ctx.createImageData(w, h);
         const d = img.data;
-        const grid = this._grid;
+        const obs = this._obs;
+        const n = obs.length;
         const dayGrid = this._dayGrid;
 
         const lats = new Float64Array(h);
@@ -1036,15 +1114,28 @@ const HeatmapLayer = L.Layer.extend({
                 const gj = (lon + 180) / 0.5 | 0;
                 if (gj < 0 || gj >= 720) continue;
                 const idx = base + gj;
-                const diff = grid[idx];
+
+                // how many observations' bands cover this cell?
+                let matchCount = 0, sumDiff = 0;
+                for (let k = 0; k < n; k++) {
+                    const dff = obs[k].grid[idx];
+                    if (dff >= 0) { matchCount++; sumDiff += dff; }
+                }
+
                 const i4 = (py * w + px) * 4;
-                if (diff >= 0) {
-                    // matching band: bright (yellow) -> dim (red) as the match worsens
-                    const t = diff / 0.2;
+                if (matchCount === n) {
+                    // overlap of every band (a single band when n === 1): bright
+                    const t = (sumDiff / n) / 0.2;
                     d[i4]   = 255;
                     d[i4+1] = (179 * (1 - t)) | 0;
                     d[i4+2] = 0;
                     d[i4+3] = (220 * (1 - t)) | 0;
+                } else if (matchCount > 0) {
+                    // covered by some but not all bands: faint gold
+                    d[i4]   = 255;
+                    d[i4+1] = 179;
+                    d[i4+2] = 0;
+                    d[i4+3] = 38;
                 } else if (dayGrid && dayGrid[idx]) {
                     // faint golden wash over the daylit part of the world
                     d[i4]   = 255;
@@ -1058,12 +1149,77 @@ const HeatmapLayer = L.Layer.extend({
     }
 });
 
-function renderHeatmap(result) {
+function renderBands() {
     if (heatmapLayer) { map.removeLayer(heatmapLayer); heatmapLayer = null; }
-    if (!result.pts.length) {
-        showToast('No matching locations found for these inputs.');
+    if (observations.length) {
+        heatmapLayer = new HeatmapLayer(observations).addTo(map);
+    }
+    refreshClearAllBtn();
+}
+
+function formatObsLabel(baseEpochMs, mode) {
+    const dt = new Date(baseEpochMs);
+    const p = v => String(v).padStart(2, '0');
+    return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())} ` +
+           `${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())} ${mode === 'local' ? 'Local' : 'UTC'}`;
+}
+
+// number of cells that fall inside every band (the intersection); -1 when < 2 observations
+function overlapCount() {
+    if (observations.length < 2) return -1;
+    const N = observations[0].grid.length;
+    let c = 0;
+    for (let idx = 0; idx < N; idx++) {
+        let all = true;
+        for (let k = 0; k < observations.length; k++) {
+            if (observations[k].grid[idx] < 0) { all = false; break; }
+        }
+        if (all) c++;
+    }
+    return c;
+}
+
+function updateObsList() {
+    const wrap = document.getElementById('obs-wrap');
+    const list = document.getElementById('obs-list');
+    if (!observations.length) {
+        wrap.style.display = 'none';
+        document.getElementById('obs-menu').style.display = 'none';
+        list.innerHTML = '';
         return;
     }
-    heatmapLayer = new HeatmapLayer(result).addTo(map);
-    map.fitBounds([[-60, -180], [85, 180]]);
+    wrap.style.display = 'flex';
+    document.getElementById('obs-count').textContent = observations.length;
+    list.innerHTML = observations.map((o, i) =>
+        `<div class="obs-row">` +
+            `<div class="obs-info">` +
+                `<span class="obs-time">${o.label}</span>` +
+                `<span class="obs-meas">H ${+o.h.toFixed(1)} · L ${+o.s.toFixed(1)}</span>` +
+            `</div>` +
+            `<button class="obs-remove" data-i="${i}" title="Remove this observation">×</button>` +
+        `</div>`
+    ).join('');
+    list.querySelectorAll('.obs-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const i = +btn.dataset.i;
+            // Removing the current (last) band means the measurement no longer maps to a
+            // band, so the next calculation should start a fresh one.
+            if (editingCurrent && i === observations.length - 1) editingCurrent = false;
+            observations.splice(i, 1);
+            renderBands();
+            updateObsList();
+            refreshNewObsBtn();   // dropping back under the cap can re-enable "New observation"
+        });
+    });
 }
+
+document.getElementById('btn-observations').addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = document.getElementById('obs-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+});
+document.addEventListener('click', e => {
+    if (!document.getElementById('obs-wrap').contains(e.target)) {
+        document.getElementById('obs-menu').style.display = 'none';
+    }
+});
