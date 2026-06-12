@@ -117,7 +117,7 @@ Load the first frame, mark its shadow and calculate. Then click **New observatio
 
 ![ShadowFinder Web with two shadow bands intersecting to pin one location](assets/DEMO_intersection_result.png)
 
-<sub>Inspired to implement the intersection by [ShadowTrace](https://bytemallet.github.io/shadowtrace/) (bytemallet).</sub>
+<p align="center"><sub>Inspired to implement the intersection by <a href="https://bytemallet.github.io/shadowtrace/">ShadowTrace</a> (bytemallet).</sub></p>
 
 ---
 
