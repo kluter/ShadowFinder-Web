@@ -110,8 +110,8 @@ One shadow gives a band that wraps the globe. Measure the **same place** at two 
 
 | Observation | Date and time | Time source |
 |---|---|---|
-| [Frame 1](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
-| [Frame 2](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
+| [DEMO_20230808_091953195.jpg](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
+| [DEMO_20240414_134449138.jpg](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
 
 Load the first frame, mark its shadow and calculate. Then click **New observation**, load the second, and calculate again. The bright zone where the two bands overlap is the answer:
 
