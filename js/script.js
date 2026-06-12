@@ -703,31 +703,23 @@ function applyExifDateTime() {
     const raw = pick(currentExif, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
     if (!raw) return;
     let year, month, day, hour, minute, second = 0;
-    let useLocal = true;
 
     if (raw instanceof Date) {
-        // exifr returns a UTC-normalised Date. Try to recover local time using
-        // the stored UTC offset (OffsetTimeOriginal / OffsetTime).
-        const offsetStr = pick(currentExif, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
-        const om = typeof offsetStr === 'string' && offsetStr.match(/([+-])(\d{2}):(\d{2})/);
-        if (om) {
-            const sign = om[1] === '+' ? 1 : -1;
-            const shiftMs = sign * (+om[2] * 60 + +om[3]) * 60000;
-            const local = new Date(raw.getTime() + shiftMs);
-            year = local.getUTCFullYear(); month = local.getUTCMonth() + 1; day = local.getUTCDate();
-            hour = local.getUTCHours(); minute = local.getUTCMinutes(); second = local.getUTCSeconds();
-        } else {
-            // No offset info — fall back to UTC time and switch to UTC mode
-            year = raw.getUTCFullYear(); month = raw.getUTCMonth() + 1; day = raw.getUTCDate();
-            hour = raw.getUTCHours(); minute = raw.getUTCMinutes(); second = raw.getUTCSeconds();
-            useLocal = false;
-        }
+        // exifr builds the Date from the EXIF wall-clock with LOCAL constructors, so the
+        // local getters read back exactly the digits stored in the file (no timezone shift).
+        year = raw.getFullYear(); month = raw.getMonth() + 1; day = raw.getDate();
+        hour = raw.getHours(); minute = raw.getMinutes(); second = raw.getSeconds();
     } else if (typeof raw === 'string') {
         const m = raw.match(/^(\d{4})[: -](\d{2})[: -](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
         if (!m) return;
         year = +m[1]; month = +m[2]; day = +m[3];
         hour = +m[4]; minute = +m[5]; second = m[6] ? +m[6] : 0;
     } else return;
+
+    // An EXIF offset tag means the stored wall-clock is local time; with no offset we take
+    // the value as already UTC (e.g. images prepared with the capture time written in UTC).
+    const offsetStr = pick(currentExif, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
+    const useLocal = typeof offsetStr === 'string' && /[+-]\d{2}:\d{2}/.test(offsetStr);
 
     document.getElementById('input-date').value =
         `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
