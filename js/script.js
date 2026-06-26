@@ -1173,14 +1173,17 @@ function overlapCount() {
 
 function updateObsList() {
     const wrap = document.getElementById('obs-wrap');
+    const opacityWrap = document.getElementById('opacity-wrap');
     const list = document.getElementById('obs-list');
     if (!observations.length) {
         wrap.style.display = 'none';
+        opacityWrap.style.display = 'none';
         document.getElementById('obs-menu').style.display = 'none';
         list.innerHTML = '';
         return;
     }
     wrap.style.display = 'flex';
+    opacityWrap.style.display = 'flex';
     document.getElementById('obs-count').textContent = observations.length;
     list.innerHTML = observations.map((o, i) =>
         `<div class="obs-row">` +

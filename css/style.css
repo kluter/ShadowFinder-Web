@@ -38,10 +38,12 @@ body {
 .panel-title { margin: 0; font-size: 15px; font-weight: 600; color: #ddd; flex-shrink: 0; }
 
 .opacity-control {
-    display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto;
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
     height: 26px; padding: 0 10px;
     background: #1e1e1e; border: 1px solid #383838; border-radius: 4px;
 }
+
+.header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .opacity-ico { font-size: 13px; color: #777; }
 #opacity-slider {
     -webkit-appearance: none; appearance: none;
