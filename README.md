@@ -169,6 +169,14 @@ It was built with AI assistance, disclosed on purpose because the [risks of opaq
 
 ---
 
+## Recognition
+
+`ShadowFinder Web` is listed in **[awesome-osint](https://github.com/jivoi/awesome-osint#-geospatial-research-and-mapping-tools)**, the curated list of open source intelligence tools, under *Geospatial Research and Mapping Tools*:
+
+> [ShadowFinder-Web](https://kluter.github.io/ShadowFinder-Web) - Geolocate photos by shadow analysis. Browser port of Bellingcat's ShadowFinder. No Jupyter, no accounts, client-side.
+
+---
+
 ## Related
 
 <img src="assets/logo_tracepoint.svg" alt="" width="14" height="14" style="vertical-align:middle;"> **[TracePoint](https://github.com/kluter/TracePoint)** - Geolocate a photo by intersecting lines of sight.
