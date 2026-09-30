@@ -81,9 +81,12 @@ const map = L.map('map-container', { center: [20, 0], zoom: 2, zoomControl: true
 
 const TILE_SETS = [
     {
-        id: 'carto-dark',
+        id: 'dark',
         label: '🌑 Dark',
-        layers: [{ url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', opts: { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19 } }]
+        layers: [
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', opts: { attribution: 'Tiles © Esri', maxZoom: 19, maxNativeZoom: 16 } },
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', opts: { attribution: '', maxZoom: 19, maxNativeZoom: 16 } }
+        ]
     },
     {
         id: 'osm',
@@ -108,7 +111,7 @@ function setTileSet(id) {
     set.layers.forEach(l => activeTileLayers.push(L.tileLayer(l.url, l.opts).addTo(map)));
     localStorage.setItem('sf-tileset', id);
 }
-setTileSet(localStorage.getItem('sf-tileset') || 'carto-dark');
+setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 
 const LayerSwitcher = L.Control.extend({
     options: { position: 'topright' },
@@ -135,7 +138,7 @@ const LayerSwitcher = L.Control.extend({
                 menu.style.display = 'none';
             };
         });
-        const savedId = localStorage.getItem('sf-tileset') || 'carto-dark';
+        const savedId = localStorage.getItem('sf-tileset') || 'dark';
         menu.querySelector(`[data-id="${savedId}"]`)?.classList.add('active');
         btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
         map.on('click', () => { menu.style.display = 'none'; });

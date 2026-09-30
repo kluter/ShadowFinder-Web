@@ -137,7 +137,7 @@ npx serve .
 
 Your photo never leaves your browser. It is drawn into a canvas and its EXIF is read in memory, no upload, no server. Confirm it yourself: open DevTools (`F12`) → Network, load an image, and no request carries it. Any EXIF text is escaped before it is shown, so a crafted file cannot inject anything.
 
-The only outbound requests are map tiles (CARTO, OpenStreetMap, Esri) and the Leaflet library. The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
+The only outbound requests are map tiles (OpenStreetMap, Esri) and the Leaflet library. The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
 
 ```javascript
 // Every network request ShadowFinder Web makes:
