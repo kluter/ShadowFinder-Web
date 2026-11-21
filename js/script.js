@@ -87,7 +87,7 @@ const map = new maplibregl.Map({
 });
 // Compass only (zoom is scroll / pinch). With visualizePitch, clicking it resets both
 // bearing and tilt, and the needle shows the tilt.
-map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'bottom-left');
+map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'top-right');
 
 function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
@@ -109,7 +109,7 @@ const mapReady = new Promise(resolve => map.once('load', resolve));
 const TILE_SETS = [
     {
         id: 'dark',
-        label: 'Dark',
+        label: 'Esri Dark Gray Canvas',
         layers: [
             { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles © Esri', maxzoom: 16 },
             { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', maxzoom: 16 }
@@ -122,7 +122,7 @@ const TILE_SETS = [
     },
     {
         id: 'esri-sat',
-        label: 'Satellite',
+        label: 'Esri World Imagery',
         layers: [
             { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles © Esri', maxzoom: 19 },
             { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', opacity: 0.7, maxzoom: 19 }
@@ -151,7 +151,7 @@ async function setTileSet(id) {
     });
 }
 
-// Base layer dropdown: the map panel's title is the selector (as in TracePoint).
+// Base map dropdown: the map panel's title is the selector (as in TracePoint).
 (() => {
     const btn  = $('btn-basemap');
     const menu = $('basemap-menu');
@@ -187,6 +187,7 @@ function newTab() {
         img: null,          // HTMLImageElement of the photo, if any
         fileName: '',
         exif: null,
+        exifDt: null,       // the capture time as EXIF gave it ({ dt, mode }), to tell an edited time
         points: [],         // up to 3: [{x,y}] in image pixels
         h: '', l: '',       // typed height / shadow length (used when there are no 3 points)
         dt: { y: '', mo: '', d: '', h: '', mi: '', s: '' },
@@ -205,9 +206,16 @@ let active = tabs[0];
 let observations = [];
 let resultOpacity = 0.85;
 let exifGpsMarker = null;
+// Bands on the map: 'all' (their overlap is the location) or 'one' (only the selected shadow's)
+let showMode = 'all';
 
 function syncObservations() {
     observations = tabs.filter(t => t.result).map(t => t.result);
+}
+
+// The bands drawn on the map, following the This / All toggle
+function visibleObservations() {
+    return showMode === 'one' ? (active.result ? [active.result] : []) : observations;
 }
 
 function tabIndex(t) { return tabs.indexOf(t) + 1; }
@@ -226,18 +234,19 @@ function renderTabs() {
         const state = t.busy ? 'busy' : t.result ? 'band' : t.noMatch ? 'nomatch' : '';
         el.innerHTML =
             `<span class="obs-dot ${state}"></span>` +
-            `<span class="obs-name">Obs ${tabIndex(t)}</span>` +
-            `<button class="obs-tab-close" title="Remove this observation" aria-label="Remove observation ${tabIndex(t)}">×</button>`;
+            `<span class="obs-name">Shadow ${tabIndex(t)}</span>` +
+            `<button class="obs-tab-close" title="Remove this shadow" aria-label="Remove shadow ${tabIndex(t)}">×</button>`;
         el.addEventListener('click', () => switchTab(t));
         el.querySelector('.obs-tab-close').addEventListener('click', e => { e.stopPropagation(); removeTab(t); });
         wrap.appendChild(el);
     });
     const add = document.createElement('button');
     add.className = 'obs-tab-add';
-    add.textContent = '+';
+    add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+    add.setAttribute('aria-label', 'New shadow');
     add.title = tabs.length >= MAX_OBS
-        ? 'Three observations is the most that helps'
-        : 'New observation: the same place at another time';
+        ? 'Three shadows is the most that helps'
+        : 'New shadow: the same place at another time';
     add.disabled = tabs.length >= MAX_OBS;
     add.addEventListener('click', addTab);
     wrap.appendChild(add);
@@ -254,8 +263,10 @@ function removeTab(t) {
     clearTimeout(t.timer);
     t.token++;   // drop any calculation still running for it
     if (tabs.length === 1) {
+        // closing the last shadow is the clear-all: start fresh
         tabs = [newTab()];
         active = tabs[0];
+        if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
     } else {
         const i = tabs.indexOf(t);
         tabs.splice(i, 1);
@@ -266,21 +277,12 @@ function removeTab(t) {
     loadTabIntoUI();
 }
 
-function clearAll() {
-    tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
-    tabs = [newTab()];
-    active = tabs[0];
-    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
-    syncObservations();
-    renderBands();
-    loadTabIntoUI();
-}
-
 function switchTab(t) {
     if (t === active) return;
     saveView();
     active = t;
     loadTabIntoUI();
+    if (showMode === 'one') renderBands();
 }
 
 // Shows the active tab on the left: photo, points, typed values, time and zone.
@@ -298,16 +300,16 @@ function loadTabIntoUI() {
         canvas.style.display = 'none';
         overlay.style.display = '';
     }
-    canvas.style.cursor = img && points.length < 3 ? 'crosshair' : 'default';
+    canvas.style.cursor = idleCursor();
     drawCanvas();
     SEGS.forEach(s => { segEl[s].value = t.dt[s]; });
     syncDtValidity();
     syncModeToggle();
     $('exif-card').style.display = 'none';
     closeCalendar();
-    syncExifButton();
+    syncExifChip();
     updateMeasureUI();
-    updateHint();
+    updateGuide();
     renderTabs();
 }
 
@@ -325,30 +327,37 @@ let spaceHeld = false;
 
 // Loads a photo into a tab (the active one by default). A new photo is a new observation in
 // that tab, so its points and band are dropped; its EXIF capture time is used when there is one.
-function loadImage(file, tab = active) {
+// onReady(tab) runs once both the image and its EXIF are read (the demo places its points then).
+function loadImage(file, tab = active, onReady = null) {
     const url = URL.createObjectURL(file);
     const image = new Image();
-    image.onload = () => {
-        tab.img = image;
-        tab.fileName = file.name || '';
-        tab.points.length = 0;
-        tab.view = null;
-        tab.result = null; tab.noMatch = false; tab.framed = false;
-        syncObservations();
-        renderBands();
-        if (tab === active) loadTabIntoUI(); else renderTabs();
-    };
-    image.onerror = () => showToast('Could not load image.');
+    const imageLoaded = new Promise((resolve, reject) => {
+        image.onload = () => {
+            tab.img = image;
+            tab.fileName = file.name || '';
+            tab.points.length = 0;
+            tab.view = null;
+            tab.result = null; tab.noMatch = false; tab.framed = false;
+            syncObservations();
+            renderBands();
+            if (tab === active) loadTabIntoUI(); else renderTabs();
+            resolve();
+        };
+        image.onerror = () => { showToast('Could not load image.'); reject(); };
+    });
     image.src = url;
 
     tab.exif = null;
-    exifr.parse(file, { tiff: true, exif: true, gps: true })
+    tab.exifDt = null;
+    const exifRead = exifr.parse(file, { tiff: true, exif: true, gps: true })
         .then(exif => { tab.exif = exif || null; })
-        .catch(() => { tab.exif = null; })
-        .finally(() => {
-            if (applyExifDateTime(tab, { quiet: false })) onInputChanged(tab);
-            if (tab === active) syncExifButton();
-        });
+        .catch(() => { tab.exif = null; });
+
+    Promise.all([imageLoaded, exifRead]).then(() => {
+        if (applyExifDateTime(tab, { quiet: !!onReady })) onInputChanged(tab);
+        if (tab === active) { syncExifChip(); updateGuide(); }
+        if (onReady) onReady(tab);
+    }).catch(() => {});
 }
 
 function fitCanvasToContainer() {
@@ -414,13 +423,65 @@ function drawLine(a, b, color) {
     ctx.setLineDash([]);
 }
 
+// Points: click to place the next one, drag any placed one (while placing and afterwards); the
+// band follows as soon as the drag pauses.
+const HIT_RADIUS = 11;
+let dragIdx = -1, suppressClick = false;
+
+function canvasXY(e) { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function pointAt(cx, cy) {
+    for (let i = points.length - 1; i >= 0; i--) {
+        const p = imageToCanvas(points[i].x, points[i].y);
+        if (Math.hypot(p.x - cx, p.y - cy) <= HIT_RADIUS) return i;
+    }
+    return -1;
+}
+function clampToImage(p) {
+    return { x: Math.min(img.naturalWidth, Math.max(0, p.x)), y: Math.min(img.naturalHeight, Math.max(0, p.y)) };
+}
+function idleCursor(cx, cy) {
+    if (!img) return 'default';
+    if (cx != null && pointAt(cx, cy) >= 0) return 'grab';
+    return points.length < 3 ? 'crosshair' : 'default';
+}
+
+canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0 || spaceHeld || !img) return;
+    const { x, y } = canvasXY(e);
+    const i = pointAt(x, y);
+    if (i < 0) return;
+    e.preventDefault();
+    dragIdx = i;
+    canvas.style.cursor = 'grabbing';
+});
+canvas.addEventListener('mousemove', e => {
+    if (dragIdx >= 0 || isPanning) return;
+    const { x, y } = canvasXY(e);
+    canvas.style.cursor = idleCursor(x, y);
+});
+window.addEventListener('mousemove', e => {
+    if (dragIdx < 0) return;
+    const { x, y } = canvasXY(e);
+    points[dragIdx] = clampToImage(canvasToImage(x, y));
+    drawCanvas();
+    onInputChanged(active, { delay: 150, quiet: true });
+});
+window.addEventListener('mouseup', e => {
+    if (dragIdx < 0) return;
+    dragIdx = -1;
+    suppressClick = true;   // the click that ends a drag places no point
+    const { x, y } = canvasXY(e);
+    canvas.style.cursor = idleCursor(x, y);
+});
+
 canvas.addEventListener('click', e => {
+    if (suppressClick) { suppressClick = false; return; }
     if (!img || isPanning || spaceHeld || points.length >= 3) return;
-    const rect = canvas.getBoundingClientRect();
-    const { x: ix, y: iy } = canvasToImage(e.clientX - rect.left, e.clientY - rect.top);
+    const { x, y } = canvasXY(e);
+    const { x: ix, y: iy } = canvasToImage(x, y);
     if (ix < 0 || iy < 0 || ix > img.naturalWidth || iy > img.naturalHeight) return;
     points.push({ x: ix, y: iy });
-    if (points.length === 3) canvas.style.cursor = 'default';
+    canvas.style.cursor = idleCursor(x, y);
     drawCanvas();
     onInputChanged(active);
     // Flow: three points done → straight on to the capture time if it is still missing.
@@ -459,7 +520,7 @@ window.addEventListener('mouseup', () => {
     if (!isPanning) return;
     // let the click that ends a pan pass without placing a point
     setTimeout(() => { isPanning = false; }, 0);
-    canvas.style.cursor = img && points.length < 3 ? 'crosshair' : 'default';
+    canvas.style.cursor = idleCursor();
 });
 
 const isTyping = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
@@ -506,11 +567,16 @@ $('file-picker').addEventListener('change', e => {
     e.target.value = '';
 });
 
-// Paste a photo from the clipboard anywhere on the page (not while typing in a field).
+// Paste anywhere on the page (not while typing in a field): a photo goes into the shadow tab,
+// coordinates or a map link become a pin on the map.
 document.addEventListener('paste', e => {
     if (isTyping(e.target)) return;
     const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
-    if (files.length) { e.preventDefault(); loadFiles(files); }
+    if (files.length) { e.preventDefault(); loadFiles(files); return; }
+    const text = e.clipboardData?.getData('text') || '';
+    const ll = parseCoordinates(text);
+    if (ll) { e.preventDefault(); pinLocation(ll); }
+    else if (text.trim()) showToast('That is not an image or coordinates.');
 });
 
 // ---- MEASUREMENTS & ANGLE QUALITY ----
@@ -570,6 +636,7 @@ function updateMeasureUI() {
     const field = $('hl-field');
     const angEl = $('measure-angle');
     const m = getMeasurements(t);
+    $('btn-reset').disabled = !(t.points.length || t.h !== '' || t.l !== '');
     field.classList.remove('q-good', 'q-warn', 'q-bad', 'measured');
     if (m && m.fromPoints) {
         inputH.value = Math.round(m.h) + ' px';
@@ -665,6 +732,7 @@ const SEG_FIRST_MAX = { mo: 1, d: 3, h: 2, mi: 5, s: 5 };
 
 function onDtChanged() {
     syncDtValidity();
+    syncExifChip();
     onInputChanged(active);
 }
 
@@ -817,16 +885,17 @@ $('cal-pop').addEventListener('click', e => {
 document.addEventListener('click', e => { if (!$('dt-wrap').contains(e.target)) closeCalendar(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCalendar(); });
 
-// UTC / Local
+// UTC / Local, inside the When field
 function syncModeToggle() {
-    document.querySelectorAll('#tz-toggle .toggle-btn').forEach(b =>
+    document.querySelectorAll('#tz-toggle .tz-btn').forEach(b =>
         b.classList.toggle('active-toggle', b.dataset.mode === active.mode));
 }
-document.querySelectorAll('#tz-toggle .toggle-btn').forEach(b => b.addEventListener('click', () => {
+document.querySelectorAll('#tz-toggle .tz-btn').forEach(b => b.addEventListener('click', () => {
     if (active.mode === b.dataset.mode) return;
     active.mode = b.dataset.mode;
     active.framed = false;   // a band in the other time basis is a different shape
     syncModeToggle();
+    syncExifChip();
     onInputChanged(active);
 }));
 
@@ -863,12 +932,29 @@ function exifGps(e) {
     return { lat: e.GPSLatitudeRef === 'S' ? -lat : lat, lng: e.GPSLongitudeRef === 'W' ? -lng : lng };
 }
 
-// Copies the photo's EXIF capture time into a tab's date/time and zone. Returns true when it did.
+// Copies the photo's EXIF capture time into a tab's date/time and zone, and remembers it so an
+// edited time can be told apart and restored. Returns true when it did.
 function applyExifDateTime(tab = active, { quiet = true } = {}) {
-    const ex = tab.exif;
-    if (!ex) return false;
+    const ext = readExifTime(tab.exif);
+    if (!ext) return false;
+    tab.exifDt = ext;
+    tab.dt = { ...ext.dt };
+    tab.mode = ext.mode;
+    if (tab === active) {
+        SEGS.forEach(s => { segEl[s].value = tab.dt[s]; });
+        syncDtValidity();
+        syncModeToggle();
+        syncExifChip();
+    }
+    if (!quiet) showToast(`Date and time taken from the photo's EXIF (${ext.mode === 'local' ? 'local time' : 'UTC'}). Check them before relying on the result.`, 'success');
+    return true;
+}
+
+// The capture time in an EXIF record, as { dt, mode }, or null.
+function readExifTime(ex) {
+    if (!ex) return null;
     const raw = pick(ex, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
-    if (!raw) return false;
+    if (!raw) return null;
     let year, month, day, hour, minute, second = 0;
 
     if (raw instanceof Date) {
@@ -878,31 +964,39 @@ function applyExifDateTime(tab = active, { quiet = true } = {}) {
         hour = raw.getHours(); minute = raw.getMinutes(); second = raw.getSeconds();
     } else if (typeof raw === 'string') {
         const m = raw.match(/^(\d{4})[: -](\d{2})[: -](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-        if (!m) return false;
+        if (!m) return null;
         year = +m[1]; month = +m[2]; day = +m[3];
         hour = +m[4]; minute = +m[5]; second = m[6] ? +m[6] : 0;
-    } else return false;
+    } else return null;
 
     // An EXIF offset tag means the stored wall-clock is local time; with no offset we take
     // the value as already UTC (e.g. images prepared with the capture time written in UTC).
     const offsetStr = pick(ex, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
     const useLocal = typeof offsetStr === 'string' && /[+-]\d{2}:\d{2}/.test(offsetStr);
-
-    tab.dt = { y: String(year), mo: pad2(month), d: pad2(day), h: pad2(hour), mi: pad2(minute), s: pad2(second) };
-    tab.mode = useLocal ? 'local' : 'utc';
-    if (tab === active) {
-        SEGS.forEach(s => { segEl[s].value = tab.dt[s]; });
-        syncDtValidity();
-        syncModeToggle();
-    }
-    if (!quiet) showToast(`Date and time taken from the photo's EXIF (${useLocal ? 'local time' : 'UTC'}). Check them before relying on the result.`, 'success');
-    return true;
+    return {
+        dt: { y: String(year), mo: pad2(month), d: pad2(day), h: pad2(hour), mi: pad2(minute), s: pad2(second) },
+        mode: useLocal ? 'local' : 'utc',
+    };
 }
 
-function syncExifButton() {
-    const ex = active.exif;
-    $('btn-exif').disabled = !active.img;
-    $('exif-dot').hidden = !(ex && (pick(ex, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime') || exifGps(ex)));
+function exifTimeEdited(t) {
+    return !!t.exifDt && (SEGS.some(s => t.dt[s] !== t.exifDt.dt[s]) || t.mode !== t.exifDt.mode);
+}
+
+// The EXIF chip in the When field: "EXIF" while the time is the photo's own, "edited ↺" once
+// changed (a click restores it). Hidden when the photo has no capture time or GPS.
+function syncExifChip() {
+    const t = active, chip = $('btn-exif');
+    const gps = exifGps(t.exif);
+    const has = !!(t.exif && (t.exifDt || gps));
+    $('exif-wrap').hidden = !has;
+    if (!has) { $('exif-card').style.display = 'none'; return; }
+    const edited = exifTimeEdited(t);
+    chip.classList.toggle('edited', edited);
+    chip.textContent = edited ? 'edited ↺' : 'EXIF';
+    chip.title = edited ? "You changed the photo's EXIF time. Click to restore it."
+               : gps   ? "Time from the photo's EXIF. Click to show where it was taken (GPS) on the map."
+               :         "Time from the photo's EXIF.";
 }
 
 function renderExifCard() {
@@ -938,18 +1032,13 @@ function renderExifCard() {
             <line x1="1" y1="8" x2="4.5" y2="8"/>
             <line x1="11.5" y1="8" x2="15" y2="8"/>
         </svg>`;
-        const useBtn = date ? `<button class="exif-use-btn" id="btn-exif-use-dt">Use this date &amp; time</button>` : '';
         const gpsBtn = gps ? `<button class="exif-gps-btn" id="btn-exif-gps">${crosshair}Show on map</button>` : '';
 
         card.innerHTML =
-            '<div class="exif-card-header">Image metadata</div>' +
+            '<div class="exif-card-header">Photo metadata (EXIF)</div>' +
             (rows.length ? `<table class="exif-table">${tableRows}</table>` : '<p class="exif-empty">No relevant metadata found.</p>') +
-            useBtn + gpsBtn;
+            gpsBtn;
 
-        card.querySelector('#btn-exif-use-dt')?.addEventListener('click', () => {
-            if (applyExifDateTime(active)) onInputChanged(active);
-            card.style.display = 'none';
-        });
         card.querySelector('#btn-exif-gps')?.addEventListener('click', () => {
             goToExifGps(gps.lat, gps.lng);
             card.style.display = 'none';
@@ -992,28 +1081,35 @@ document.addEventListener('click', e => {
     if (btn) navigator.clipboard.writeText(btn.dataset.coords).catch(() => {});
 });
 
+// Chip: click restores an edited EXIF time, otherwise shows the GPS position; hover shows the metadata.
 $('btn-exif').addEventListener('click', e => {
     e.stopPropagation();
-    const card = $('exif-card');
-    if (card.style.display !== 'none') card.style.display = 'none';
-    else { renderExifCard(); card.style.display = 'block'; }
+    const t = active;
+    if (exifTimeEdited(t)) {
+        if (applyExifDateTime(t)) onInputChanged(t);
+        return;
+    }
+    const gps = exifGps(t.exif);
+    if (gps) { $('exif-card').style.display = 'none'; goToExifGps(gps.lat, gps.lng); }
 });
-document.addEventListener('click', e => {
-    if (!$('exif-wrap').contains(e.target)) $('exif-card').style.display = 'none';
-});
+(() => {
+    const wrap = $('exif-wrap'), card = $('exif-card');
+    let hideTimer = 0;
+    wrap.addEventListener('mouseenter', () => {
+        clearTimeout(hideTimer);
+        renderExifCard();
+        card.style.display = 'block';
+    });
+    wrap.addEventListener('mouseleave', () => {
+        hideTimer = setTimeout(() => { card.style.display = 'none'; }, 250);
+    });
+})();
 
-// ---- MENU (one menu for the left side) ----
+// ---- MENU (left side; session save/load arrives here next) ----
 
 function menuItems() {
-    const t = active;
-    const hasMeasurement = t.points.length > 0 || t.h !== '' || t.l !== '';
-    const anything = tabs.length > 1 || t.img || hasMeasurement || SEGS.some(s => t.dt[s] !== '');
     return [
-        { label: 'New observation', hint: 'The same place at another time', disabled: tabs.length >= MAX_OBS, run: addTab },
-        { label: 'Reset measurement', hint: 'Clear the points or typed values of this observation', disabled: !hasMeasurement, run: resetMeasurement },
-        { label: 'Remove this observation', disabled: !anything, run: () => removeTab(active) },
-        { sep: true },
-        { label: 'Clear all', hint: 'Remove every observation and band', disabled: !anything && !observations.length, run: clearAll, danger: true },
+        { label: 'Try the demo', hint: 'A photo with its points set and its EXIF time', run: loadDemo },
     ];
 }
 
@@ -1049,56 +1145,131 @@ function resetMeasurement() {
     clearTimeout(t.timer); t.token++;
     syncObservations();
     renderBands();
-    canvas.style.cursor = img ? 'crosshair' : 'default';
+    canvas.style.cursor = idleCursor();
     drawCanvas();
     updateMeasureUI();
-    updateHint();
+    updateGuide();
     renderTabs();
 }
+$('btn-reset').addEventListener('click', resetMeasurement);
 
-// ---- STEP HINT ----
+// ---- DEMO ----
+// The demo photo with its points on the teal box and its shadow (which runs sideways across the
+// frame, so the length is reliable); its EXIF supplies the capture time.
+const DEMO = {
+    file: 'DEMO_20240414_134449138.jpg',
+    points: [{ x: 653, y: 623 }, { x: 653, y: 535 }, { x: 768, y: 624 }],
+};
 
-function updateHint() {
-    const t = active;
-    const el = $('step-hint');
-    const m = getMeasurements(t);
-    let text, cls = '';
-    if (t.busy) { text = 'Calculating…'; cls = 'busy'; }
-    else if (!t.img && !m) text = 'Drop or paste a photo, or type the height and shadow length';
-    else if (t.img && !m && t.points.length < 3) {
-        text = `<i style="background:${POINT_COLORS[t.points.length]}"></i>${POINT_HINTS[t.points.length]}`;
-    }
-    else if (!m) { text = 'Shadow length is too short — reset and mark the points again'; cls = 'bad'; }
-    else if (dtEpoch(t) == null) text = dtFilled(t) ? 'That date or time does not exist — check it' : 'Enter the capture date and time';
-    else if (t.noMatch) { text = 'No place on Earth matches these inputs'; cls = 'bad'; }
-    else if (t.result) {
-        const alt = Math.atan2(t.result.h, t.result.s) * 180 / Math.PI;
-        text = `Band on the map · sun ${alt.toFixed(1)}° above the horizon`;
-        cls = 'done';
-    }
-    else text = 'Calculating…';
-    el.innerHTML = text;
-    el.className = 'step-hint ' + cls;
+function loadDemo() {
+    fetch('assets/' + DEMO.file)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+        .then(blob => {
+            // into this shadow if it is empty, else a new one (or this one at the cap)
+            const empty = !active.img && !getMeasurements(active);
+            if (!empty && tabs.length < MAX_OBS) { const t = newTab(); tabs.push(t); switchTab(t); }
+            loadImage(new File([blob], DEMO.file, { type: 'image/jpeg' }), active, tab => {
+                tab.points.splice(0, tab.points.length, ...DEMO.points.map(p => ({ ...p })));
+                if (tab === active) { drawCanvas(); canvas.style.cursor = idleCursor(); }
+                onInputChanged(tab, { delay: 0 });
+                showToast('Demo loaded: the points sit on the teal box and its shadow, the time comes from the EXIF. Drag a point and watch the band follow.', 'success');
+            });
+        })
+        .catch(() => showToast('Could not load the demo image.'));
 }
+$('btn-demo-link').addEventListener('click', loadDemo);
+
+// ---- STEP GUIDE ----
+// The steps as icons down the right edge of the photo, the current one lit; the bottom hint
+// says what to do next (as in TracePoint).
+
+const GUIDE_STEPS = [
+    { title: 'Add a photo, or type H and L', icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>' },
+    { title: 'Click the base of the object', icon: '<path d="M12 4v12"/><path d="M5 21h14"/><circle cx="12" cy="18" r="2.4" fill="currentColor"/>' },
+    { title: 'Click the top of the object',  icon: '<path d="M12 8v12"/><path d="M5 21h14"/><circle cx="12" cy="5.5" r="2.4" fill="currentColor"/>' },
+    { title: 'Click the tip of the shadow',  icon: '<path d="M6 4v15"/><path d="M6 19h10" stroke-dasharray="2.2 2.2"/><circle cx="18.5" cy="19" r="2.4" fill="currentColor"/>' },
+    { title: 'Check the capture time',       icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
+    { title: 'The band on the map',          icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>' },
+];
+
+function guideStatus() {
+    const t = active;
+    const m = getMeasurements(t);
+    if (!t.img && !m) return { idx: 0, hint: 'Drop or paste an image, or browse · no photo? type H and L above' };
+    if (!m) {
+        if (t.points.length < 3) return { idx: 1 + t.points.length, hint: POINT_HINTS[t.points.length] };
+        return { idx: 3, hint: 'The shadow is too short · drag the points apart', cls: 'bad' };
+    }
+    if (dtEpoch(t) == null) {
+        return dtFilled(t) ? { idx: 4, hint: 'That date or time does not exist · check it', cls: 'bad' }
+                           : { idx: 4, hint: 'Enter the capture date and time' };
+    }
+    if (t.busy || (!t.result && !t.noMatch)) return { idx: 5, hint: 'Calculating…' };
+    if (t.noMatch) return { idx: 5, hint: 'No place on Earth matches · check the points and the time', cls: 'bad' };
+    const alt = Math.atan2(t.result.h, t.result.s) * 180 / Math.PI;
+    const more = tabs.length < MAX_OBS ? ' · + adds the same place at another time' : '';
+    return { idx: GUIDE_STEPS.length, hint: `Band found · sun ${alt.toFixed(1)}° high${more}`, cls: 'done' };
+}
+
+function buildGuide() {
+    const g = $('guide');
+    g.innerHTML = '<div class="guide-rail"><div class="guide-rail-fill"></div></div>';
+    GUIDE_STEPS.forEach((st, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'guide-step';
+        b.title = st.title;
+        b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${st.icon}</svg>`;
+        b.addEventListener('click', () => guideAction(i));
+        g.appendChild(b);
+    });
+}
+
+// Clicking the current step does it where it can.
+function guideAction(i) {
+    const { idx } = guideStatus();
+    if (i === 0 && idx === 0) $('file-picker').click();
+    else if (i === 4 && idx === 4) focusFirstEmptySeg();
+    else if (i === 5 && active.result) {
+        if (showMode === 'all' && observations.length >= 2 && overlapCount() > 0) frameOverlap();
+        else frameBand(active.result.grid);
+    }
+}
+
+function updateGuide() {
+    const { idx, hint, cls } = guideStatus();
+    $('guide').querySelectorAll('.guide-step').forEach((b, i) => {
+        b.classList.toggle('done', i < idx);
+        b.classList.toggle('current', i === idx);
+    });
+    $('guide').querySelector('.guide-rail-fill').style.height = `${Math.min(1, idx / (GUIDE_STEPS.length - 1)) * 100}%`;
+    const h = $('image-hint');
+    h.textContent = hint;
+    h.className = 'step-hint' + (cls ? ' ' + cls : '');
+}
+buildGuide();
 
 // ---- AUTO-CALCULATE ----
 
 // Called after any change to a tab's input: refreshes the left side and recalculates the band
-// shortly after typing stops, once the input is complete.
-function onInputChanged(t) {
-    if (t === active) { updateMeasureUI(); updateHint(); }
+// shortly after typing (or dragging) stops, once the input is complete. A quiet update (a point
+// being dragged) does not pulse the band.
+function onInputChanged(t, { delay = 350, quiet = false } = {}) {
+    if (t === active) { updateMeasureUI(); updateGuide(); }
     clearTimeout(t.timer);
     if (!getMeasurements(t) || dtEpoch(t) == null) return;
-    t.timer = setTimeout(() => calculateTab(t), 350);
+    t.quiet = quiet;
+    t.timer = setTimeout(() => calculateTab(t), delay);
 }
 
 async function calculateTab(t) {
     const m = getMeasurements(t);
     const baseEpochMs = dtEpoch(t);
     if (!m || baseEpochMs == null) return;
+    const quiet = t.quiet; t.quiet = false;
     const token = ++t.token;
     t.busy = true;
-    if (t === active) updateHint();
+    if (t === active) updateGuide();
     renderTabs();
     try {
         const tzGrid = t.mode === 'local' ? await loadTzGrid(new Date(baseEpochMs)) : null;
@@ -1117,19 +1288,21 @@ async function calculateTab(t) {
             // bands, else to the ring's centre (where the sun is overhead). Local-mode bands are
             // not rings, so they, and every later update, just pulse.
             const overlap = overlapCount();
-            if (!t.framed && observations.length >= 2 && overlap > 0) frameOverlap();
-            else if (!t.framed && observations.length === 1 && t.mode === 'utc') frameBand(grid);
-            else pulseBand();
+            const oneShown = showMode === 'one' || observations.length === 1;
+            if (!t.framed && !oneShown && overlap > 0) frameOverlap();
+            else if (!t.framed && oneShown && t.mode === 'utc') frameBand(grid);
+            else if (!quiet) pulseBand();
             t.framed = true;
-            if (overlap === 0) {
+            if (overlap === 0 && !quiet) {
                 showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
             }
         }
+        refreshPinPopup();
     } catch (err) {
         showToast('Calculation failed: ' + err.message);
     } finally {
         if (token === t.token) t.busy = false;
-        if (t === active) updateHint();
+        if (t === active) updateGuide();
         renderTabs();
     }
 }
@@ -1315,15 +1488,18 @@ const hideLayer = id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visib
 
 async function renderBands() {
     $('opacity-wrap').style.display = observations.length ? 'flex' : 'none';
+    $('show-toggle').hidden = observations.length < 2;
+    syncShowToggle();
     await mapReady;
-    if (!observations.length) { hideLayer(BAND_LAYER); hideLayer(DAY_LAYER); return; }
+    const shown = visibleObservations();
+    if (!shown.length) { hideLayer(BAND_LAYER); hideLayer(DAY_LAYER); return; }
 
     setImageLayer(BAND_SOURCE, BAND_LAYER,
         [[GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat], [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat]],
-        paintBandImage(observations));
+        paintBandImage(shown));
 
     // The daylight wash only makes sense for a single UTC moment.
-    const one = observations.length === 1 && observations[0].mode !== 'local' ? observations[0] : null;
+    const one = shown.length === 1 && shown[0].mode !== 'local' ? shown[0] : null;
     if (!one) { hideLayer(DAY_LAYER); return; }
     if (dayImgFor !== one.baseEpochMs || !map.getSource(DAY_SOURCE)) {
         dayImgFor = one.baseEpochMs;
@@ -1400,6 +1576,200 @@ function overlapCount() {
     }
     return c;
 }
+
+// ---- SHOW THIS / ALL BANDS ----
+
+function syncShowToggle() {
+    document.querySelectorAll('#show-toggle .toggle-btn').forEach(b =>
+        b.classList.toggle('active-toggle', b.dataset.show === showMode));
+}
+document.querySelectorAll('#show-toggle .toggle-btn').forEach(b => b.addEventListener('click', () => {
+    if (showMode === b.dataset.show) return;
+    showMode = b.dataset.show;
+    renderBands();
+}));
+
+// ---- COORDINATE PIN (map bar, or Ctrl+V anywhere) ----
+// One pin at a time, to see whether a roughly known place lies in the bands.
+
+const RAD = 180 / Math.PI;
+const validLatLng = (lat, lng) =>
+    Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+
+// "52.39, 13.06", "52.39° N, 13.06° E", "52°23'24"N 13°03'36"E", Web Mercator metres, and links
+// from Google Maps, Apple, Bing, OpenStreetMap, Yandex or anything with lat=/lon=.
+// After TracePoint's parser. Returns { lat, lng } or null.
+function parseCoordinates(text) {
+    const s = String(text || '').trim();
+    if (!s || s.length > 2000) return null;
+
+    if (/^https?:\/\//i.test(s)) {
+        const known = parseCoordinateUrl(s);
+        if (known !== undefined) return known;
+        const m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/) ||
+                  s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) ||
+                  s.match(/[?&](?:q|ll|query|center)=(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i);
+        return m ? validLatLng(+m[1], +m[2]) : null;
+    }
+
+    const merc = s.match(/^@?\s*([-+]?\d+(?:\.\d+)?)\s*[,;\s]\s*([-+]?\d+(?:\.\d+)?)$/);
+    if (merc) {
+        const x = +merc[1], y = +merc[2], R = 6378137, MAX = Math.PI * R;
+        if (Math.max(Math.abs(x), Math.abs(y)) > 1000 && Math.abs(x) <= MAX && Math.abs(y) <= MAX) {
+            return validLatLng(Math.atan(Math.sinh(y / R)) * RAD, x / R * RAD);
+        }
+    }
+
+    const norm = s.replace(/[″“”]|''/g, '"').replace(/[′‘’]/g, "'");
+    const PART = /(?<![A-Za-z])([NSEW])?\s*([-+]?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*"\s*)?([NSEW](?![A-Za-z]))?/gi;
+    const parts = [];
+    for (const m of norm.matchAll(PART)) {
+        const [, pre, deg, min, sec, post] = m;
+        if ((min && +min >= 60) || (sec && +sec >= 60)) return null;
+        const hemi = (pre || post || '').toUpperCase();
+        let v = Math.abs(+deg) + (min ? +min / 60 : 0) + (sec ? +sec / 3600 : 0);
+        if (deg.startsWith('-') || hemi === 'S' || hemi === 'W') v = -v;
+        parts.push({ v, hemi });
+    }
+    if (parts.length !== 2) return null;
+    let [a, b] = parts;
+    if (/[EW]/.test(a.hemi) || /[NS]/.test(b.hemi)) [a, b] = [b, a];
+    else if (!a.hemi && !b.hemi && Math.abs(a.v) > 90 && Math.abs(b.v) <= 90) [a, b] = [b, a];
+    return validLatLng(a.v, b.v);
+}
+
+// A known map service is read by its own rules (Yandex writes longitude first); undefined means
+// "not a known service", so the generic rules get their turn.
+function parseCoordinateUrl(s) {
+    let url;
+    try { url = new URL(s); } catch { return null; }
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const q = url.searchParams, hash = new URLSearchParams(url.hash.slice(1));
+    const NUM = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)';
+    const pair = (text, sep = ',', lngFirst = false) => {
+        const m = (text || '').match(new RegExp(`^\\s*(${NUM})\\s*${sep}\\s*(${NUM})\\s*$`));
+        return m ? validLatLng(+m[lngFirst ? 2 : 1], +m[lngFirst ? 1 : 2]) : null;
+    };
+    if (host === 'maps.apple.com') return pair(q.get('coordinate') ?? q.get('ll') ?? q.get('q'));
+    if (host === 'bing.com')       return pair(q.get('cp'), '~');
+    if (/^yandex\.[a-z.]+$/.test(host)) return pair(q.get('ll'), ',', true);
+    if (host === 'openstreetmap.org' || host === 'osm.org') {
+        if (q.has('mlat') && q.has('mlon')) return pair(`${q.get('mlat')},${q.get('mlon')}`);
+        const view = hash.get('map')?.split('/');
+        return view?.length === 3 ? pair(`${view[1]},${view[2]}`) : null;
+    }
+    if (q.has('lat') && (q.has('lon') || q.has('lng'))) return pair(`${q.get('lat')},${q.get('lon') ?? q.get('lng')}`);
+    return undefined;
+}
+
+let coordPin = null;
+
+// Which shadows' bands cover a spot (nearest grid cell), as text for the pin.
+function bandsAt(lat, lng) {
+    if (lat < GRID.minLat || lat > GRID.maxLat) return 'Outside the calculated area (60°S to 85°N)';
+    const i = Math.round((lat - GRID.minLat) / GRID.res);
+    const j = ((Math.round((lng - GRID.minLon) / GRID.res) % GRID.cols) + GRID.cols) % GRID.cols;
+    const idx = Math.min(GRID.rows - 1, i) * GRID.cols + j;
+    const withBand = tabs.filter(t => t.result);
+    if (!withBand.length) return 'No band calculated yet';
+    const inside = withBand.filter(t => t.result.grid[idx] < MATCH_TOL).map(t => `Shadow ${tabIndex(t)}`);
+    if (!inside.length) return 'Outside every band';
+    if (inside.length === withBand.length && withBand.length > 1) return 'Inside every band';
+    return 'Inside the band of ' + inside.join(', ');
+}
+
+function pinHtml(lat, lng) {
+    const c = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    return `<div class="tp-popup-header">Pinned location</div>` +
+        `<div class="tp-popup-body"><span>${c}</span>` +
+        `<button class="tp-copy-btn" data-action="copy-coords" data-coords="${c}" title="Copy coordinates">` +
+        `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M2 11V2h9"/></svg>` +
+        `</button></div>` +
+        `<div class="tp-popup-note">${bandsAt(lat, lng)}</div>` +
+        `<button class="tp-popup-link" data-action="remove-pin">Remove pin</button>`;
+}
+
+function pinLocation({ lat, lng }) {
+    removePin();
+    const el = document.createElement('div');
+    el.className = 'coord-pin';
+    const popup = new maplibregl.Popup({ className: 'tp-popup tp-popup-pin', offset: 14, maxWidth: 'none' }).setHTML(pinHtml(lat, lng));
+    coordPin = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).setPopup(popup).addTo(map);
+    map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 4) });
+    map.once('moveend', () => { if (coordPin && !popup.isOpen()) coordPin.togglePopup(); });
+}
+
+function removePin() {
+    if (coordPin) { coordPin.remove(); coordPin = null; }
+}
+
+function refreshPinPopup() {
+    if (!coordPin) return;
+    const { lat, lng } = coordPin.getLngLat();
+    coordPin.getPopup().setHTML(pinHtml(lat, lng));
+}
+
+document.addEventListener('click', e => {
+    if (e.target.closest('[data-action="remove-pin"]')) removePin();
+});
+
+(() => {
+    const input = $('coord-input');
+    const PLACEHOLDER = input.placeholder;
+    const tryPin = () => {
+        const ll = parseCoordinates(input.value);
+        if (!ll) {
+            input.value = '';
+            input.classList.add('search-input-error');
+            input.placeholder = 'Not recognised · try 52.39, 13.06';
+            return;
+        }
+        input.value = '';
+        input.blur();
+        pinLocation(ll);
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryPin(); } });
+    input.addEventListener('paste', () => setTimeout(tryPin, 0));
+    input.addEventListener('input', () => { input.classList.remove('search-input-error'); input.placeholder = PLACEHOLDER; });
+    input.addEventListener('blur', () => { input.classList.remove('search-input-error'); input.placeholder = PLACEHOLDER; });
+})();
+
+// ---- MAP RIGHT-CLICK: the clicked coordinates, to copy ----
+
+const ctxMenu = document.createElement('div');
+ctxMenu.className = 'map-ctx-menu';
+ctxMenu.style.display = 'none';
+$('map-container').appendChild(ctxMenu);
+const hideCtxMenu = () => { ctxMenu.style.display = 'none'; };
+
+map.on('contextmenu', e => {
+    e.preventDefault();
+    const c = `${e.lngLat.lat.toFixed(6)}, ${e.lngLat.lng.toFixed(6)}`;
+    ctxMenu.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'map-ctx-head';
+    head.textContent = c;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'map-ctx-item';
+    copy.textContent = 'Copy coordinates';
+    copy.onclick = () => {
+        hideCtxMenu();
+        navigator.clipboard.writeText(c)
+            .then(() => showToast('Coordinates copied.', 'success'))
+            .catch(() => showToast('Could not copy to clipboard.'));
+    };
+    ctxMenu.append(head, copy);
+    ctxMenu.style.display = 'block';
+    const box = map.getContainer().getBoundingClientRect();
+    const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
+    ctxMenu.style.left = `${Math.min(e.point.x, box.width - w - 4)}px`;
+    ctxMenu.style.top  = `${Math.min(e.point.y, box.height - h - 4)}px`;
+});
+map.on('movestart', hideCtxMenu);
+map.on('click', hideCtxMenu);
+document.addEventListener('mousedown', e => { if (!ctxMenu.contains(e.target)) hideCtxMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCtxMenu(); });
 
 // ---- OPACITY ----
 

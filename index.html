@@ -31,10 +31,16 @@
                 <div class="obs-tabs" id="obs-tabs" role="tablist" aria-label="Observations"></div>
             </div>
 
-            <!-- Input bar: when, then how long the shadow is; the menu at the end -->
+            <!-- Input bar: when (with the photo's EXIF time built in), then how long the shadow is -->
             <div id="input-bar">
                 <div class="dt-wrap" id="dt-wrap">
-                    <div class="dt-field" id="dt-field" role="group" aria-label="Capture date and time" title="Capture date and time · type straight through, ↑/↓ change a part, paste works too">
+                    <div class="dt-field" id="dt-field" role="group" aria-label="Capture date and time">
+                        <!-- EXIF chip: hover for the photo's metadata; click shows its GPS on the map, or restores the EXIF time once edited -->
+                        <div class="exif-wrap" id="exif-wrap" hidden>
+                            <button type="button" class="exif-chip" id="btn-exif">EXIF</button>
+                            <div class="exif-card" id="exif-card" style="display:none"></div>
+                        </div>
+                        <span class="dt-parts" title="Capture date and time · type straight through, ↑/↓ change a part, paste works too">
                         <input class="dt-seg dt-seg-y" data-seg="y" placeholder="yyyy" inputmode="numeric" autocomplete="off" aria-label="Year">
                         <span class="dt-sep">-</span>
                         <input class="dt-seg" data-seg="mo" placeholder="mm" inputmode="numeric" autocomplete="off" aria-label="Month">
@@ -46,25 +52,16 @@
                         <input class="dt-seg" data-seg="mi" placeholder="mm" inputmode="numeric" autocomplete="off" aria-label="Minute">
                         <span class="dt-sep">:</span>
                         <input class="dt-seg" data-seg="s" placeholder="ss" inputmode="numeric" autocomplete="off" aria-label="Second">
+                        </span>
+                        <div class="tz-switch" id="tz-toggle" role="group" aria-label="Time zone of the capture time">
+                            <button type="button" id="btn-utc" class="tz-btn active-toggle" data-mode="utc" title="The time is in UTC">UTC</button>
+                            <button type="button" id="btn-local" class="tz-btn" data-mode="local" title="The time is the local clock time where the photo was taken">Local</button>
+                        </div>
                         <button type="button" class="dt-cal-btn" id="btn-calendar" title="Pick the day from a calendar" aria-label="Open calendar">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
                         </button>
                     </div>
                     <div class="cal-pop" id="cal-pop" style="display:none" role="dialog" aria-label="Pick a day"></div>
-                </div>
-                <div class="exif-wrap" id="exif-wrap">
-                    <button class="exif-burger" id="btn-exif" title="Photo metadata (EXIF): capture time and GPS" disabled>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="16 18 22 12 16 6"/>
-                            <polyline points="8 6 2 12 8 18"/>
-                        </svg>
-                        <span class="exif-dot" id="exif-dot" hidden></span>
-                    </button>
-                    <div class="exif-card" id="exif-card" style="display:none"></div>
-                </div>
-                <div class="toggle-wrap" id="tz-toggle" role="group" aria-label="Time zone of the capture time">
-                    <button id="btn-utc" class="toggle-btn active-toggle" data-mode="utc" title="The time is in UTC">UTC</button>
-                    <button id="btn-local" class="toggle-btn" data-mode="local" title="The time is the local clock time where the photo was taken">Local</button>
                 </div>
                 <div class="hl-field" id="hl-field" title="Object height and shadow length: measured from the 3 points, or typed. Only the ratio matters, so any unit works.">
                     <label for="input-h">H</label>
@@ -73,6 +70,9 @@
                     <input id="input-l" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="shadow">
                     <span id="measure-angle" class="measure-angle" hidden></span>
                 </div>
+                <button type="button" class="icon-btn" id="btn-reset" title="Reset the points (or the typed height and length) to measure again" aria-label="Reset measurement" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 3 3 9 9 9"/></svg>
+                </button>
                 <div class="menu-wrap" id="menu-wrap">
                     <button class="session-burger" id="btn-menu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -88,13 +88,17 @@
             <div id="image-container">
                 <canvas id="image-canvas"></canvas>
                 <div id="drop-overlay">
-                    Drop / paste a photo here
+                    Drop / Paste image here
                     <button id="btn-browse" type="button">Browse</button>
-                    <span class="drop-or">or type the height and shadow length above</span>
+                    <span class="drop-or">or</span>
+                    <button id="btn-demo-link" type="button">Try the Demo</button>
+                    <span class="drop-note">No photo? Type the height and shadow length above.</span>
                 </div>
                 <input type="file" id="file-picker" accept="image/*" style="display:none">
-                <div id="step-hint-wrap"><span id="step-hint" class="step-hint"></span></div>
+                <!-- Step guide (buildGuide in script.js): the steps as icons, the current one lit -->
+                <div id="guide"></div>
                 <div id="zoom-hint">
+                    <span class="step-hint" id="image-hint"></span>
                     <span class="hint-pill">scroll to zoom · space+drag to pan</span>
                 </div>
             </div>
@@ -104,9 +108,8 @@
         <div id="map-panel">
             <div class="panel-header">
                 <div class="basemap-wrap" id="basemap-wrap">
-                    <button type="button" id="btn-basemap" class="basemap-btn" title="Base layer" aria-haspopup="true" aria-expanded="false">
-                        <span class="basemap-caption">Base layer</span>
-                        <span id="basemap-name">Dark</span>
+                    <button type="button" id="btn-basemap" class="basemap-btn" title="Base map" aria-haspopup="true" aria-expanded="false">
+                        <span id="basemap-name">Esri Dark Gray Canvas</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,4.5 6,8 9.5,4.5"/></svg>
                     </button>
                     <div class="layer-menu basemap-menu" id="basemap-menu" style="display:none"></div>
@@ -121,15 +124,25 @@
                 </div>
             </div>
 
-            <!-- Map bar: how the map is shown -->
+            <!-- Map bar: coordinates to pin on the left; how the bands and the map are shown on the right -->
             <div id="map-bar">
-                <div class="toggle-wrap" id="projection-toggle" role="group" aria-label="Map projection">
-                    <button id="btn-globe" class="toggle-btn" data-projection="globe" title="Show the map as a globe">Globe</button>
-                    <button id="btn-flat" class="toggle-btn" data-projection="mercator" title="Show the map flat (Web Mercator)">2D</button>
+                <div class="coord-search">
+                    <input type="text" class="coord-search-input" id="coord-input" placeholder="Paste coordinates…" autocomplete="off" spellcheck="false"
+                           title="Decimal (52.39, 13.06), degrees-minutes-seconds, or a map link. Press Enter to pin it. Ctrl+V anywhere on the page works too.">
                 </div>
-                <div class="opacity-control" id="opacity-wrap" title="Band opacity" style="display:none">
-                    <span class="opacity-ico">◐</span>
-                    <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85" aria-label="Band opacity">
+                <div class="map-bar-end">
+                    <div class="toggle-wrap" id="show-toggle" role="group" aria-label="Bands on the map" hidden>
+                        <button type="button" class="toggle-btn" data-show="one" title="Show only the band of the selected shadow">This</button>
+                        <button type="button" class="toggle-btn" data-show="all" title="Show every band; their overlap is the location">All</button>
+                    </div>
+                    <div class="opacity-control" id="opacity-wrap" title="Band opacity" style="display:none">
+                        <span class="opacity-ico">◐</span>
+                        <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85" aria-label="Band opacity">
+                    </div>
+                    <div class="toggle-wrap" id="projection-toggle" role="group" aria-label="Map projection">
+                        <button type="button" id="btn-globe" class="toggle-btn" data-projection="globe" title="Show the map as a globe">Globe</button>
+                        <button type="button" id="btn-flat" class="toggle-btn" data-projection="mercator" title="Show the map flat (Web Mercator)">2D</button>
+                    </div>
                 </div>
             </div>
 
@@ -141,15 +154,15 @@
                     <button class="help-close" id="btn-help-close">×</button>
                 </div>
                 <ol class="help-steps">
-                    <li><b>Add a photo</b>: drop it, paste it, or click Browse. If it carries an EXIF capture time, the date and time are filled in for you.</li>
-                    <li><b>Mark 3 points</b> on the photo: the <b>base</b> of the object, its <b>top</b>, then the <b>tip</b> of the shadow. No photo? Type the <b>H</b>eight and shadow <b>L</b>ength instead.</li>
-                    <li><b>Enter the date and time</b> the photo was taken, and pick <b>UTC</b> or <b>Local</b>.</li>
-                    <li>The band appears on the map by itself: every place where that shadow could fall at that moment.</li>
-                    <li><b>Narrow it down</b> (optional): click <b>+</b> next to the tab for another observation of the same place at a different time. Where the bands overlap is the location. Two bands give a fix, a third resolves any ambiguity, so the tool caps it at three. Fixed webcams are ideal for this.</li>
+                    <li><b>Add a photo:</b> drop, paste or browse. No photo? Type H and L.</li>
+                    <li><b>Mark 3 points:</b> base, top, shadow tip. Drag to adjust.</li>
+                    <li><b>Check the time:</b> EXIF fills it in; pick UTC or Local.</li>
+                    <li><b>Read the band:</b> every place that shadow falls at that moment.</li>
+                    <li><b>Narrow it down:</b> <b>+</b> adds the same place at another time; the overlap is the spot.</li>
                 </ol>
                 <div class="help-warning">
                     <span class="help-warning-icon">⚠</span>
-                    <span>Shadow length is only accurate when the <b>camera is roughly perpendicular to the shadow</b>, so the shadow runs sideways across the frame. If it points toward or away from you it looks foreshortened, and the result can't be guaranteed accurate. The tool shows this angle and warns you.</span>
+                    <span>Reliable only when the shadow runs <b>sideways across the frame</b> (about 90°). The ∠ readout warns you.</span>
                 </div>
                 <p class="help-related">
                     Related: <a href="https://github.com/kluter/TracePoint" target="_blank" rel="noopener"><img src="assets/logo_tracepoint.svg" alt="" class="related-logo"><b>TracePoint</b></a>, a companion tool for geolocation by line-of-sight intersection.

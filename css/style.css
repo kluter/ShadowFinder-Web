@@ -102,12 +102,14 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 }
 .obs-tab:hover .obs-tab-close, .obs-tab.active .obs-tab-close, .obs-tab-close:focus-visible { opacity: 1; }
 .obs-tab-close:hover:not(:disabled) { background: #3a1515; color: #ff5555; }
+/* "+" as in TracePoint: a square button with a drawn plus */
 .obs-tab-add {
     width: 32px; height: 32px; padding: 0; flex-shrink: 0;
-    background: none; border: 1px dashed #3a3a3a; border-radius: 4px;
-    font-size: 16px; line-height: 1; color: #888;
+    display: flex; align-items: center; justify-content: center;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #999;
 }
-.obs-tab-add:hover:not(:disabled) { background: #222; border-style: solid; color: #fff; }
+.obs-tab-add svg { width: 11px; height: 11px; display: block; }
+.obs-tab-add:hover:not(:disabled) { background: #222; color: #fff; }
 
 /* ---- INPUT BAR (left) and MAP BAR (right): same row height, so they line up ---- */
 #input-bar, #map-bar {
@@ -140,8 +142,28 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .dt-seg::selection { background: #7a5500; color: #fff; }
 .dt-sep { color: #555; font-size: 13px; padding: 0 1px; }
 .dt-gap { width: 10px; }
+.dt-parts { display: flex; align-items: center; }
+/* EXIF chip at the start of the When field */
+.dt-field .exif-wrap { margin-right: 8px; }
+.exif-chip {
+    height: 20px; padding: 0 7px; border-radius: 10px;
+    background: #2a1e00; border: 1px solid #7a5500; color: #ffb300;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+}
+.exif-chip:hover:not(:disabled) { background: #3a2a00; color: #ffd04d; border-color: #ffb300; }
+.exif-chip.edited { background: #1e1e1e; border-color: #444; color: #aaa; font-weight: 600; letter-spacing: 0.2px; }
+.exif-chip.edited:hover:not(:disabled) { background: #2a1e00; border-color: #ffb300; color: #ffb300; }
+/* UTC / Local inside the When field */
+.tz-switch { display: flex; margin-left: 10px; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
+.tz-btn {
+    height: 22px; padding: 0 8px; border: none; border-radius: 0;
+    background: #151515; color: #666; font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+}
+.tz-btn + .tz-btn { border-left: 1px solid #333; }
+.tz-btn:hover:not(:disabled):not(.active-toggle) { background: #222; color: #aaa; }
+.tz-btn.active-toggle { background: #2a1e00; color: #ffb300; }
 .dt-cal-btn {
-    width: 26px; height: 26px; padding: 0; margin-left: 6px;
+    width: 26px; height: 26px; padding: 0; margin-left: 4px;
     display: flex; align-items: center; justify-content: center;
     background: none; border: none; color: #777;
 }
@@ -195,6 +217,16 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .hl-field.q-bad label { color: #ff5d5d; }
 .hl-field.q-bad .hl-input { color: #ff9999; }
 
+/* Small square icon buttons in the bars (reset) */
+.icon-btn {
+    width: 32px; height: 32px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #151515; border: 1px solid #333; border-radius: 4px;
+    color: #aaa; box-shadow: 0 2px 6px #0006;
+}
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn:hover:not(:disabled) { background: #222; color: #ffb300; }
+
 /* One menu for the left side */
 .menu-wrap { position: relative; margin-left: auto; }
 .session-burger {
@@ -219,23 +251,48 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .session-item.danger:not(.disabled):hover { background: #3a1515; color: #ff7777; }
 .session-sep { height: 1px; margin: 4px 0; background: #2a2a2a; }
 
-/* ---- STEP HINT: what to do next, bottom centre of the photo area ---- */
-#step-hint-wrap {
-    position: absolute; left: 0; right: 0; bottom: 40px;
-    display: flex; justify-content: center; pointer-events: none; z-index: 5;
+/* ---- NEXT-STEP HINT: centred at the bottom of the photo (as in TracePoint) ---- */
+#image-container { container-type: inline-size; }
+@container (max-width: 560px) {
+    .hint-pill { display: none; }
+    .step-hint { max-width: calc(100% - 64px) !important; }
 }
 .step-hint {
-    display: inline-flex; align-items: center; gap: 8px;
-    max-width: calc(100% - 24px); padding: 7px 16px;
-    background: #151515ee; border: 1px solid #5a4000; border-radius: 16px;
-    box-shadow: 0 2px 10px #000a;
-    font-size: 12px; color: #ffd04d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: calc(100% - 230px); min-width: 180px; padding: 8px 16px; text-align: center;
+    background: #151515d9; border: 1px solid #2a2a2a; border-radius: 8px;
+    font-size: 12px; color: #ffb300; line-height: 1.3;
+    pointer-events: none;
 }
 .step-hint:empty { display: none; }
-.step-hint i { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.step-hint.done { border-color: #2f6a4a; color: #a0dbb8; }
-.step-hint.bad  { border-color: #7a2a2a; color: #ff9999; }
-.step-hint.busy { border-color: #444; color: #bbb; }
+.step-hint.done { color: #a0dbb8; }
+.step-hint.bad  { color: #ff9999; }
+
+/* ---- STEP GUIDE: the steps as icons, right edge of the photo, the current one lit ---- */
+#guide {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 5;
+    width: 46px; padding: 8px 0;
+    background: #151515d9; border: 1px solid #2a2a2a; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center;
+}
+.guide-rail {
+    position: absolute; right: 7px; top: 24px; bottom: 24px; width: 2px;
+    background: #333; border-radius: 1px;
+}
+.guide-rail-fill { width: 100%; height: 0; background: #ffb300; border-radius: 1px; transition: height 0.3s; }
+.guide-step, .guide-step:hover:not(:disabled) {
+    position: relative; width: 46px; height: 40px; flex-shrink: 0;
+    background: none; border: none; border-radius: 0; padding: 0; cursor: default;
+    display: flex; align-items: center; justify-content: center;
+    color: #555;
+}
+.guide-step svg { width: 20px; height: 20px; margin-right: 8px; }
+.guide-step.done, .guide-step.done:hover:not(:disabled) { color: #8a6a1a; }
+.guide-step.current, .guide-step.current:hover:not(:disabled) { color: #ffb300; cursor: pointer; }
+.guide-step.current svg { animation: guidePulse 1.6s ease-in-out infinite; }
+@keyframes guidePulse {
+    0%, 100% { filter: drop-shadow(0 0 2px #ffb300aa); }
+    50%      { filter: drop-shadow(0 0 7px #ffb300); }
+}
 
 /* ---- IMAGE CONTAINER ---- */
 #image-container {
@@ -265,16 +322,23 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 #btn-browse:hover { background: #222; color: #aaa; border-color: #444; }
-.drop-or { font-size: 11px; color: #555; letter-spacing: 0.2px; }
+.drop-or { font-size: 11px; color: #555; letter-spacing: 0; }
+#btn-demo-link {
+    pointer-events: auto;
+    padding: 3px 10px; font-size: 10px; color: #777; border-color: #2e2e2e; background: #161616;
+}
+#btn-demo-link:hover { color: #ffb300; border-color: #7a5500; background: #1e1600; }
+.drop-note { margin-top: 10px; font-size: 11px; color: #444; letter-spacing: 0.2px; }
 #image-container.drag-active #drop-overlay { border-color: #ffb300; color: #ffb300; }
 
-/* ---- ZOOM HINT ---- */
+/* ---- BOTTOM OF THE PHOTO: next-step hint centred, zoom pill at the right ---- */
 #zoom-hint {
     position: absolute; bottom: 10px; left: 10px; right: 10px;
-    display: flex; gap: 6px; pointer-events: none;
-    font-size: 10px; color: #777; letter-spacing: 0.3px;
+    display: flex; justify-content: center; align-items: flex-end; pointer-events: none; z-index: 5;
 }
 .hint-pill {
+    position: absolute; right: 0; bottom: 0;
+    font-size: 10px; color: #777; letter-spacing: 0.3px;
     background: #111a; border: 1px solid #2a2a2a;
     border-radius: 10px; padding: 3px 9px;
     white-space: nowrap;
@@ -409,11 +473,6 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .basemap-btn:hover, .basemap-btn[aria-expanded="true"] { background: #262626; border-color: #555; color: #fff; }
 .basemap-btn[aria-expanded="true"] { border-color: #ffb300; }
 .basemap-btn svg { flex-shrink: 0; color: #888; transition: transform 0.15s; }
-.basemap-caption {
-    font-size: 10px; font-weight: 600; color: #777;
-    text-transform: uppercase; letter-spacing: 0.6px;
-    padding-right: 8px; border-right: 1px solid #3a3a3a;
-}
 .basemap-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
 .layer-menu {
     position: absolute; top: 100%; left: 0; margin-top: 6px; padding: 4px 0;
@@ -428,27 +487,12 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .layer-item:hover  { background: #222; color: #fff; }
 .layer-item.active { color: #ffb300; background: #2a1e00; }
 
-/* ---- EXIF VIEWER (button next to the capture time) ---- */
+/* ---- EXIF METADATA (card under the EXIF chip, shown on hover) ---- */
 .exif-wrap { position: relative; }
-.exif-burger {
-    position: relative;
-    width: 32px; height: 32px; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: #151515; border: 1px solid #333;
-    border-radius: 4px; cursor: pointer;
-    color: #aaa; box-shadow: 0 2px 6px #0006;
-    transition: background 0.15s, color 0.15s;
-}
-.exif-burger svg { width: 14px; height: 14px; display: block; }
-.exif-burger:hover:not(:disabled) { background: #222; color: #fff; }
-/* the photo carries a capture time or GPS */
-.exif-dot {
-    position: absolute; top: 4px; right: 4px;
-    width: 6px; height: 6px; border-radius: 50%; background: #ffb300;
-}
+.exif-wrap[hidden] { display: none; }
 
 .exif-card {
-    position: absolute; top: calc(100% + 6px); left: 0;
+    position: absolute; top: calc(100% + 12px); left: -8px;
     background: #151515; border: 1px solid #2a2a2a;
     border-radius: 6px; min-width: 280px; max-width: 340px;
     box-shadow: 0 4px 20px #000c; overflow: hidden; z-index: 1000;
@@ -560,7 +604,56 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='29' height='29' viewBox='0 0 29 29'%3E%3Cpath d='m10.5 14 4-8 4 8z' fill='%23ffb300'/%3E%3Cpath d='m10.5 16 4 8 4-8z' fill='%23666'/%3E%3C/svg%3E");
 }
 .maplibregl-ctrl-group button.maplibregl-ctrl-compass:not(:disabled):hover { background-color: #2a1e00; }
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl { margin: 0 0 10px 10px; }
+.maplibregl-ctrl-top-right .maplibregl-ctrl { margin: 10px 10px 0 0; }
+
+/* ---- MAP BAR: coordinate input on the left, display toggles on the right ---- */
+.map-bar-end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.toggle-wrap[hidden] { display: none; }
+.coord-search { flex: 0 1 260px; min-width: 120px; }
+.coord-search-input {
+    display: block; width: 100%; height: 32px;
+    background: #151515; color: #ddd; border: 1px solid #333; border-radius: 4px;
+    padding: 0 10px; font-size: 12px; font-family: inherit;
+    outline: none; box-shadow: 0 2px 6px #0006;
+}
+.coord-search-input::placeholder { color: #666; }
+.coord-search-input:focus { border-color: #ffb300; }
+.coord-search-input.search-input-error { border-color: #ff4444; }
+.coord-search-input.search-input-error::placeholder { color: #ff6666; }
+
+/* Pin from pasted coordinates */
+.coord-pin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #ffb300; border: 3px solid #151515; box-shadow: 0 0 0 2px #ffb300, 0 2px 8px #000c;
+    cursor: pointer;
+}
+.tp-popup-note { padding: 0 14px 6px; font-size: 11px; color: #ffd04d; }
+.tp-popup-link {
+    display: block; width: 100%; padding: 6px 14px 9px; text-align: left;
+    background: none; border: none; border-top: 1px solid #222; border-radius: 0;
+    font-size: 11px; color: #777;
+}
+.tp-popup-link:hover:not(:disabled) { background: #1c1c1c; color: #ff7777; }
+
+/* ---- MAP RIGHT-CLICK MENU ---- */
+.map-ctx-menu {
+    position: absolute; z-index: 1000;
+    background: #151515; border: 1px solid #2a2a2a;
+    border-radius: 6px; min-width: 190px;
+    box-shadow: 0 4px 16px #000a; overflow: hidden;
+    font-size: 12px;
+}
+.map-ctx-head {
+    padding: 8px 14px; font-family: monospace; font-size: 11px;
+    color: #ffb300; background: #0d0d0d; border-bottom: 1px solid #2a2a2a;
+    user-select: text;
+}
+.map-ctx-item {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 14px; color: #bbb;
+    background: none; border: none; border-radius: 0; cursor: pointer; font: inherit;
+}
+.map-ctx-item:hover:not(:disabled) { background: #222; color: #fff; }
 .maplibregl-ctrl-attrib.maplibregl-compact { background: #151515cc; color: #888; }
 .maplibregl-ctrl-attrib a { color: #aaa; }
 .maplibregl-canvas:focus { outline: none; }
