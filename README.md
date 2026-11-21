@@ -2,7 +2,7 @@
 
 **Geolocate a photo by the length of a shadow, entirely in your browser.**
 
-`ShadowFinder Web` is a browser-based port of Bellingcat's [**ShadowFinder**](https://github.com/bellingcat/ShadowFinder). From an object, its shadow, and the date and time, it maps **every place on Earth** where that shadow could fall. No setup, accounts, Jupyter or Colab. Drop an image, mark three points, pick a time, hit calculate. No uploads. No server. Everything runs locally in your browser.
+`ShadowFinder Web` is a browser-based port of Bellingcat's [**ShadowFinder**](https://github.com/bellingcat/ShadowFinder). From an object, its shadow, and the date and time, it maps **every place on Earth** where that shadow could fall. Drop a photo, mark three points, and the band appears on a globe. No setup, accounts, Jupyter or Colab. No uploads. No server. Everything runs locally in your browser.
 
 **[Try it live → kluter.github.io/ShadowFinder-Web](https://kluter.github.io/ShadowFinder-Web/)**
 
@@ -14,53 +14,47 @@
 
 This project would not exist without the original [ShadowFinder](https://github.com/bellingcat/ShadowFinder), created by [**Galen Reich**](https://github.com/GalenReich) at Bellingcat, with contributors **Jordan Gillard**, **Thomas Ellmenreich** and **Boris Nezlobin**. They did the hard part. `ShadowFinder Web` is a faithful re-implementation of their algorithm in JS.
 
-If you use this tool in research, cite the original project. 
-
----
-
-## Why port it?
-
-The original is brilliant, but getting a result takes work: 
-A Google sign-in for Colab, measuring shadow pixels in a *separate* tool, and pasting numbers into code cells. `ShadowFinder Web` removes those steps and wraps the method in a clean, guided interface.
+If you use this tool in research, cite the original project.
 
 ---
 
 ## What it adds over the notebook
 
+The original is brilliant, but getting a result takes work: a Google sign-in for Colab, measuring shadow pixels in a *separate* tool, and pasting numbers into code cells. `ShadowFinder Web` removes those steps.
+
 | Aspect | Original notebook | `ShadowFinder Web` |
 |---|---|---|
-| **Measuring** | a separate image tool, then paste numbers | click base, top and shadow tip on the image |
-| **Running it** | edit and run code cells | a guided five-step interface |
-| **Date and time** | type it in | type it in, or autofill from `EXIF` if present |
-| **Bad geometry** | no warning | live shadow-angle warning (experimental) |
-| **Result** | a static `PNG` | an interactive map (Dark, OpenStreetMap, Satellite) |
-| **Combining shots** | one shadow, one band | overlap several timed shots of the same place to pin it |
 | **To start** | Colab and a Google sign-in | open a web page |
+| **Measuring** | a separate image tool, then paste numbers | click base, top and shadow tip on the photo |
+| **Running it** | edit and run code cells | nothing to run: the band follows every change |
+| **Date and time** | type it in | filled in from the photo's `EXIF`, or typed |
+| **Bad geometry** | no warning | live shadow-angle warning (experimental) |
+| **Result** | a static `PNG` | an interactive **globe** or flat map, on dark, street or satellite base maps |
+| **Combining shots** | one shadow, one band | up to three timed shots of the same place; their overlap pins it |
+| **Checking a place** | none | paste coordinates to see if they fall in the band; right-click to open the spot in Google Maps, Google Earth, [TracePoint](https://github.com/kluter/TracePoint) and more |
+| **Taking it further** | the `PNG` | export to Google Earth (`KMZ`) and GIS (`GeoTIFF`, `GeoJSON`), see [docs/export.md](docs/export.md) |
+| **Saving work** | the notebook | session files with optional photos, and autosave in the browser |
 
 ---
 
 ## The key requirement
 
-> **Shadow length is only accurate when the camera is side-on to the shadow** (it runs left to right across the frame, about 90 degrees to the object). Point it toward or away from the camera and perspective distorts the shadow's apparent length, skewing the height-to-shadow-length ratio the tool depends on, so the band lands in the wrong place. The tool measures this angle and warns you.
-
-The tool grades the object-to-shadow angle like this:
-
-| Angle, object to shadow | Verdict |
-|---|---|
-| `88° to 98°` | 🟢 good, reliable |
-| `85° to 87°`, or `99° to 109°` | 🟡 borderline, usable |
-| `< 85°` or `> 109°` | 🔴 likely wrong |
-
-These thresholds are experimental, set by feel rather than rigorous testing. Contributions to refine them are welcome.
+> **Shadow length is only accurate when the shadow runs sideways across the frame**, about 90° to the object. Toward or away from the camera, perspective distorts its length and the band lands in the wrong place. The tool measures this angle and warns you: green is reliable, yellow usable, red likely wrong ([thresholds](docs/method.md#the-shadow-angle)).
 
 ---
 
 ## How to use
 
-1. **Drop a photo** on the left panel (or click *Browse*).
-2. **Mark three points:** the base of the object, its top, then the shadow tip.
-3. **Set the date and time** (or click *Use this `date & time`* from `EXIF`). Pick **UTC** or **Local**.
-4. **Calculate.** The bright band shows every location where that shadow could occur.
+1. **Add a photo:** drop it, paste it with `Ctrl+V`, or click *Browse*. Its `EXIF` capture time fills in by itself.
+2. **Mark three points:** the base of the object, its top, then the shadow tip. Drag a point to adjust.
+3. **Check the time** and pick **UTC** or **Local**. The band appears as soon as the input is complete.
+4. **Narrow it down:** **+** adds the same place at another time. Where the bands overlap is the spot.
+
+No photo? Type the object's height **H** and shadow length **L** (any unit, only the ratio matters) and the time.
+
+> New here? Click **Try the demo** and mark the teal box: its base, its top, then the tip of its shadow.
+
+Every control, the accepted coordinate formats and the session file format are in **[docs/controls.md](docs/controls.md)**.
 
 ---
 
@@ -70,54 +64,55 @@ These thresholds are experimental, set by feel rather than rigorous testing. Con
 
 The band is **every place the shadow could fall**, a search space, not a pin.
 
-- **Brightest is the best match**, fading out toward the 20% edge.
-- Expect a long curved band (often two), not a dot; a tighter band means better input.
-- It only rules places out. Combine it with terrain, climate, and other clues to narrow down.
-- Got the same place at another time? Add it as a new observation; where the bands overlap narrows to a spot (two for a fix, a third to disambiguate).
+- **Brightest is the best match**, fading out toward the 20% edge. The colours follow the base map (amber on the dark map, as in the legend; orange-red on OpenStreetMap; magenta-violet on satellite).
+- Expect a long curved band, not a dot. A tighter band means better input.
+- With two or more shadows, **Overlap** shows every band plus where they all match; **Selected** shows only the current shadow's band. **Layers** sets the opacity of each band, the overlap and the day/night shade.
+- It only rules places out. Combine it with terrain, climate and other clues.
 
----
-
-## How it works
-
-- Sun positions use the formulas of [SunCalc](https://github.com/mourner/suncalc), the JS equivalent of the original's `suncalc` package, built into `js/script.js` so the sun is worked out once per moment instead of once per grid point.
-- The world is sampled on a `0.5 degree grid` (latitude -60 to 85). Each point's sun altitude gives the expected shadow ratio `height / tan(altitude)`, compared to yours.
-- Points within a **20% band** are drawn, brightest where the match is exact, the same band the original produces.
-- **Local mode** uses Bellingcat's `timezone_grid.json` to convert your local time to UTC at every point before computing the sun.
-
-Checked against the [Original](https://github.com/bellingcat/ShadowFinder): `height 10`, `shadow 8`, `2024-02-29 12:00 UTC` reproduces the ring from its README.
-
-The one deliberate difference is the projection: the original is a static equirectangular plot, while `ShadowFinder Web` draws the band on an interactive **globe** you can spin and zoom into. Same band, same data, shown in its true shape: a flat map stretches bands near the poles and cuts them at the date line, a globe does neither.
-
-For the full method and worked examples, see [Bellingcat's article](https://www.bellingcat.com/resources/2024/08/22/shadow-geolocate-geolocation-locate-image-tool-open-source-bellingcat-measure/).
+How the band is computed, Local time, and the limits of the method: **[docs/method.md](docs/method.md)**.
 
 ---
 
 ## Try it yourself
 
-#### Three single-shadow cases with known answers:
+#### Three single-shadow cases with known answers
 
 | Test | Date and time | Expected |
 |------|---------------|----------|
-| Manual Input: `Height 10`, `Shadow 8` | `2024-02-29 12:00:00 UTC` | The ring from the original's [README](https://github.com/bellingcat/ShadowFinder) |
-| A [Sunny Seaside Image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [Result Map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
-| A [still](assets/05_03_2024_111741_shadow_test_rainbolt.png) from this [Rainbolt Video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41 Local` | The [result](assets/result_shadow_test_rainbolt.png) revealed in the video |
+| Manual input: `H 10`, `L 8` | `2024-02-29 12:00:00 UTC` | The ring from the original's [README](https://github.com/bellingcat/ShadowFinder) |
+| A [sunny seaside image](https://www.bellingcat.com/app/uploads/2024/08/image10.jpg) | `2024-07-10 10:30:46 UTC` | Bellingcat's [result map](https://www.bellingcat.com/app/uploads/2024/08/ShadowTool.png) |
+| A [still](assets/05_03_2024_111741_shadow_test_rainbolt.png) from this [Rainbolt video](https://www.youtube.com/watch?v=pQIjDPFgdJA) | `2024-05-03 11:17:41 Local` | The [result](assets/result_shadow_test_rainbolt.png) revealed in the video |
 
-Mind the Rainbolt date format: the video writes it `05 03 2024`, month-first, so that is 3 May, not 5 March. Enter the wrong one and the band lands in the wrong place.
+Mind the Rainbolt date: the video writes it `05 03 2024`, month first, so that is 3 May, not 5 March.
 
 #### Cross two shadows into an intersection
 
-One shadow gives a band that wraps the globe. Measure the **same place** at two different times and the bands cross, narrowing it toward a single spot. Two demo frames of one location, each carrying its capture time in `EXIF` (already in `UTC`):
+One shadow gives a band that wraps the globe. The **same place** at two different times gives two bands that cross. Two demo frames of one location, each with its capture time in `EXIF` (in `UTC`):
 
-| Observation | Date and time | Time source |
+| Shadow | Photo | Date and time |
 |---|---|---|
-| [20230808_091953195.jpg](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
-| [20240414_134449138.jpg](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` | baked into the file's `EXIF`, hit *use this date & time* |
+| 1 | [20230808_091953195.jpg](assets/DEMO_20230808_091953195.jpg) | `2023-08-08 09:19:53 UTC` |
+| 2 | [20240414_134449138.jpg](assets/DEMO_20240414_134449138.jpg) | `2024-04-14 13:44:49 UTC` |
 
-Load the first frame, mark its shadow and calculate. Then click **New observation**, load the second, and calculate again. The bright zone where the two bands overlap is the answer:
+Drop the first photo and mark its shadow. Then drop the second (it opens a new shadow by itself, or click **+** first) and mark its shadow. The map turns to the bright zone where the two bands overlap:
 
 ![ShadowFinder Web with two shadow bands intersecting to pin one location](assets/DEMO_intersection_result.png)
 
 <p align="center"><sub>Inspired to implement the intersection by <a href="https://bytemallet.github.io/shadowtrace/">ShadowTrace</a> (bytemallet).</sub></p>
+
+---
+
+## Security & Privacy
+
+- **Your photos never leave your machine.** No request carries image data. Check it in DevTools → Network.
+- **The only requests are map tiles** (Esri, OpenStreetMap). They carry no image or session data, but tile coordinates do reveal the area you are looking at.
+- **Autosave keeps your shadows and photos in this browser** (`IndexedDB`), never anywhere else. Switch it off in the ☰ menu for sensitive material; **Clear** deletes the saved copy.
+- **Right-click links** (Google, Bing, TracePoint and others) contact those sites only when you click one.
+- **Imported files cannot run code.** The code is plain, unminified JavaScript with two pinned, bundled libraries ([MapLibre GL JS](https://maplibre.org/), [exifr](https://github.com/MikeKovarik/exifr)); nothing loads from a CDN.
+
+This tool was developed with AI assistance, disclosed because the [risks of opaque, AI-generated OSINT tools](https://www.dutchosintguy.com/post/vibe-coding-is-becoming-an-osint-risk) are real; the answer is readable code anyone can verify.
+
+Every request, every stored value and all caveats: **[docs/privacy.md](docs/privacy.md)**.
 
 ---
 
@@ -126,52 +121,16 @@ Load the first frame, mark its shadow and calculate. Then click **New observatio
 A static site, no build step. Serve the folder with anything:
 
 ```bash
-# any static server works, for example
 npx serve .
-# or VS Code's Live Server extension
+# or
+python3 -m http.server
 ```
-
----
-
-## Security & Privacy
-
-Your photo never leaves your browser. It is drawn into a canvas and its EXIF is read in memory, no upload, no server. Confirm it yourself: open DevTools (`F12`) → Network, load an image, and no request carries it. Any EXIF text is escaped before it is shown, so a crafted file cannot inject anything.
-
-Everything the app runs is served from its own folder; the only outbound requests are map tiles (OpenStreetMap, Esri). The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
-
-```javascript
-// Every network request ShadowFinder Web makes:
-// GET .../tile/{z}/{x}/{y}          (map tiles: server.arcgisonline.com, tile.openstreetmap.org)
-// GET timezone_grid.json            (local file, Local mode only)
-// No CDN, no image, no coordinates, nothing else.
-```
-
-A **Content-Security-Policy** in `index.html` enforces this in the browser: scripts, styles and workers may only come from the app's own origin, and images and network requests only from there and the two tile servers. No inline scripts, no `eval`.
-
-### Code and dependencies
-
-`ShadowFinder Web` is plain HTML, CSS, and JavaScript with no build step. Its logic lives in `js/script.js`, unminified, so what you read is what runs.
-
-| Library | Loaded from | Touches your data? |
-|---|---|---|
-| [MapLibre GL JS](https://maplibre.org/) 6.19.0 | bundled in `vendor/maplibre-gl/` | No, renders the globe and map tiles only |
-| [exifr](https://github.com/MikeKovarik/exifr) | bundled in `js/` | Locally only, no network |
-
-Nothing loads from a CDN, so the app works offline apart from the basemap tiles.
-
-It was built with AI assistance, disclosed on purpose because the [risks of opaque, AI-generated OSINT tools](https://www.dutchosintguy.com/post/vibe-coding-is-becoming-an-osint-risk) are real. The fix is not to hide it, but to keep the code readable so anyone can verify it.
-
-### Security caveats
-
-- **Map tiles reveal the area you view.** Tile requests encode the map coordinates, so a tile server can infer where you are looking. Use a VPN if that matters.
-- **The map worker is outside the page's CSP.** MapLibre fetches tiles from a Web Worker, and a `<meta>` CSP does not reach workers. The worker is bundled code that only requests the tile URLs listed in `js/script.js`; to enforce it in the browser too, serve the site with the same policy as an HTTP `Content-Security-Policy` header.
-- **Browser and OS trust.** If your browser or system is compromised, no web app can protect you.
 
 ---
 
 ## Recognition
 
-`ShadowFinder-Web` is listed in **[awesome-osint](https://github.com/jivoi/awesome-osint#-geospatial-research-and-mapping-tools)**, the curated list of open source intelligence tools, under *Geospatial Research and Mapping Tools*
+`ShadowFinder Web` is listed in **[awesome-osint](https://github.com/jivoi/awesome-osint#-geospatial-research-and-mapping-tools)**, the curated list of open source intelligence tools, under *Geospatial Research and Mapping Tools*.
 
 ---
 
