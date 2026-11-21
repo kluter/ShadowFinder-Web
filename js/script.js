@@ -2,10 +2,11 @@
    ShadowFinder Web – script.js
    ============================================================ */
 
-const canvas    = document.getElementById('image-canvas');
+const $ = id => document.getElementById(id);
+const canvas    = $('image-canvas');
 const ctx       = canvas.getContext('2d');
-const container = document.getElementById('image-container');
-const overlay   = document.getElementById('drop-overlay');
+const container = $('image-container');
+const overlay   = $('drop-overlay');
 
 // ---- TOAST ----
 
@@ -17,7 +18,7 @@ function showToast(msg, type = 'error') {
     const count = toastCounts.get(msg) || 0;
     if (count >= TOAST_MAX_STACK) return;
     toastCounts.set(msg, count + 1);
-    const tc = document.getElementById('toast-container');
+    const tc = $('toast-container');
     const item = document.createElement('div');
     item.className = 'toast-item' + (type === 'success' ? ' toast-success' : '');
     item.innerHTML = `<span>${msg}</span><button class="toast-close">×</button>`;
@@ -42,7 +43,7 @@ let stickyToast = null;
 function setStickyToast(msg, type) {
     if (stickyToast) { stickyToast.remove(); stickyToast = null; }
     if (!msg) return;
-    const tc = document.getElementById('toast-container');
+    const tc = $('toast-container');
     const item = document.createElement('div');
     item.className = 'toast-item' + (type === 'warn' ? ' toast-warn' : '');
     item.innerHTML = `<span>${msg}</span><button class="toast-close">×</button>`;
@@ -55,31 +56,20 @@ function setStickyToast(msg, type) {
     stickyToast = item;
 }
 
-// ---- STATE ----
+// ---- CONSTANTS ----
 
-let img = null;
-let points = [];       // up to 3: [{x,y}, ...]  — canvas coords
-let measureMode = false;
+const POINT_LABELS = ['Base', 'Top', 'Shadow tip'];
+const POINT_HINTS  = ['Click the base of the object', 'Click the top of the object', 'Click the tip of the shadow'];
+const POINT_COLORS = ['#ffb300', '#00aaff', '#ff4d6d'];
 
-const POINT_LABELS  = ['Base', 'Top', 'Shadow tip'];
-const POINT_COLORS  = ['#ffb300', '#00aaff', '#ff4d6d'];
-const STEP_INSTRUCTIONS = [
-    'Drop an image to begin, or enter values manually',
-    'Click the base of the object',
-    'Click the top of the object',
-    'Click the tip of the shadow',
-    'Set the date & time',
-];
-
-// pan/zoom
-let scale = 1, offsetX = 0, offsetY = 0;
-let isPanning = false, panStartX = 0, panStartY = 0, panOffsetX = 0, panOffsetY = 0;
+// Two observations give a fix with a two-point ambiguity; a third resolves it. Beyond three,
+// extra bands can only shrink the overlap and risk excluding the true spot, so it is capped.
+const MAX_OBS = 3;
 
 // ---- MAP ----
 
-// MapLibre GL (bundled in vendor/, exposed by js/maplibre-global.js) on a globe: the band is
-// planet-scale, and a globe shows its true shape where flat Web Mercator stretches it.
-// Globe or flat (Web Mercator), switched in the map bar and remembered.
+// MapLibre GL (bundled in vendor/, exposed by js/maplibre-global.js). Globe or flat
+// (Web Mercator), switched in the map bar and remembered.
 const PROJECTIONS = ['globe', 'mercator'];
 let projection = PROJECTIONS.includes(localStorage.getItem('sf-projection')) ? localStorage.getItem('sf-projection') : 'globe';
 
@@ -103,13 +93,15 @@ function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
     map.setProjection({ type: projection });
     localStorage.setItem('sf-projection', projection);
+    syncProjectionToggle();
+}
+function syncProjectionToggle() {
     document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
         b.classList.toggle('active-toggle', b.dataset.projection === projection));
 }
 document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
     b.addEventListener('click', () => setProjection(b.dataset.projection)));
-document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
-    b.classList.toggle('active-toggle', b.dataset.projection === projection));
+syncProjectionToggle();
 
 // Resolves once the style is ready for sources and layers to be added.
 const mapReady = new Promise(resolve => map.once('load', resolve));
@@ -142,15 +134,15 @@ let activeBaseIds = [];
 async function setTileSet(id) {
     const set = TILE_SETS.find(s => s.id === id) || TILE_SETS[0];
     localStorage.setItem('sf-tileset', set.id);
-    document.getElementById('basemap-name').textContent = set.label;
+    $('basemap-name').textContent = set.label;
     document.querySelectorAll('#basemap-menu .layer-item').forEach(i =>
         i.classList.toggle('active', i.dataset.id === set.id));
 
     await mapReady;
     activeBaseIds.forEach(lid => { map.removeLayer(lid); map.removeSource(lid); });
     activeBaseIds = [];
-    // Basemap layers go under the band layer when it exists.
-    const beforeId = map.getLayer(BAND_LAYER) ? BAND_LAYER : undefined;
+    // Basemap layers go under the daylight and band layers when they exist.
+    const beforeId = [DAY_LAYER, BAND_LAYER].find(l => map.getLayer(l));
     set.layers.forEach((l, i) => {
         const lid = `base-${set.id}-${i}`;
         map.addSource(lid, { type: 'raster', tiles: [l.url], tileSize: 256, maxzoom: l.maxzoom, attribution: l.attribution || '' });
@@ -159,10 +151,10 @@ async function setTileSet(id) {
     });
 }
 
-// Basemap dropdown: the map panel's title is the selector (as in TracePoint).
+// Base layer dropdown: the map panel's title is the selector (as in TracePoint).
 (() => {
-    const btn  = document.getElementById('btn-basemap');
-    const menu = document.getElementById('basemap-menu');
+    const btn  = $('btn-basemap');
+    const menu = $('basemap-menu');
     const open = show => {
         menu.style.display = show ? 'block' : 'none';
         btn.setAttribute('aria-expanded', String(show));
@@ -176,132 +168,205 @@ async function setTileSet(id) {
         menu.appendChild(item);
     });
     btn.addEventListener('click', e => { e.stopPropagation(); open(menu.style.display === 'none'); });
-    document.addEventListener('click', e => { if (!document.getElementById('basemap-wrap').contains(e.target)) open(false); });
+    document.addEventListener('click', e => { if (!$('basemap-wrap').contains(e.target)) open(false); });
     map.on('mousedown', () => open(false));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') open(false); });
 })();
 setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 
+// ---- OBSERVATIONS (one per tab) ----
+//
+// Every tab is one observation: a photo with three marked points, or just a typed height and
+// shadow length, plus the capture time. A tab's band is recalculated whenever its input is
+// complete; `observations` is the list of bands currently on the map.
+
+let tabSeq = 0;
+function newTab() {
+    return {
+        id: ++tabSeq,
+        img: null,          // HTMLImageElement of the photo, if any
+        fileName: '',
+        exif: null,
+        points: [],         // up to 3: [{x,y}] in image pixels
+        h: '', l: '',       // typed height / shadow length (used when there are no 3 points)
+        dt: { y: '', mo: '', d: '', h: '', mi: '', s: '' },
+        mode: 'utc',        // 'utc' | 'local'
+        result: null,       // { id, label, baseEpochMs, mode, h, s, grid } once calculated
+        noMatch: false,
+        busy: false,
+        framed: false,      // the map has already been turned to this tab's band once
+        view: null,         // saved photo zoom/pan
+        timer: 0, token: 0,
+    };
+}
+
+let tabs = [newTab()];
+let active = tabs[0];
+let observations = [];
 let resultOpacity = 0.85;
-let observations = [];   // each: { id, label, baseEpochMs, mode, h, s, grid, dayGrid }
-// Two observations give a fix with a two-point ambiguity; a third resolves it.
-// Beyond three, extra bands can only shrink the AND-overlap and risk excluding the
-// true spot, so the count is capped here.
-const MAX_OBS = 3;
+let exifGpsMarker = null;
 
-// While true, the last entry in `observations` is the "current" band being edited:
-// recalculating replaces it rather than appending. "New observation" commits it (sets
-// this false) so the next calculation starts a fresh band.
-let editingCurrent = false;
-
-// "New observation" commits the current band and starts the next, so it is only available
-// once there is a current band to commit (or an image loaded to swap), and under the cap.
-function refreshNewObsBtn() {
-    const canStartNext = (img || editingCurrent) && observations.length < MAX_OBS;
-    document.getElementById('btn-new-image').disabled = !canStartNext;
+function syncObservations() {
+    observations = tabs.filter(t => t.result).map(t => t.result);
 }
 
-// "Clear all" is the global reset, so it is available the moment anything has been entered:
-// an image, marked points, manual input, a date/time, or any band on the map.
-function refreshClearAllBtn() {
-    const anything = img || observations.length || points.length ||
-        document.getElementById('input-date').value ||
-        document.getElementById('input-time').value ||
-        document.getElementById('manual-h').value ||
-        document.getElementById('manual-l').value;
-    document.getElementById('btn-clear-map').disabled = !anything;
+function tabIndex(t) { return tabs.indexOf(t) + 1; }
+
+function renderTabs() {
+    const wrap = $('obs-tabs');
+    wrap.innerHTML = '';
+    tabs.forEach(t => {
+        const el = document.createElement('div');
+        el.className = 'obs-tab' + (t === active ? ' active' : '');
+        el.setAttribute('role', 'tab');
+        el.setAttribute('aria-selected', String(t === active));
+        el.title = t.result ? `${t.result.label}${t.fileName ? ' · ' + t.fileName : ''}`
+                 : t.noMatch ? 'No place matches these inputs'
+                 : 'Not complete yet';
+        const state = t.busy ? 'busy' : t.result ? 'band' : t.noMatch ? 'nomatch' : '';
+        el.innerHTML =
+            `<span class="obs-dot ${state}"></span>` +
+            `<span class="obs-name">Obs ${tabIndex(t)}</span>` +
+            `<button class="obs-tab-close" title="Remove this observation" aria-label="Remove observation ${tabIndex(t)}">×</button>`;
+        el.addEventListener('click', () => switchTab(t));
+        el.querySelector('.obs-tab-close').addEventListener('click', e => { e.stopPropagation(); removeTab(t); });
+        wrap.appendChild(el);
+    });
+    const add = document.createElement('button');
+    add.className = 'obs-tab-add';
+    add.textContent = '+';
+    add.title = tabs.length >= MAX_OBS
+        ? 'Three observations is the most that helps'
+        : 'New observation: the same place at another time';
+    add.disabled = tabs.length >= MAX_OBS;
+    add.addEventListener('click', addTab);
+    wrap.appendChild(add);
 }
 
-function clearMap() {
-    observations = [];
+function addTab() {
+    if (tabs.length >= MAX_OBS) return;
+    const t = newTab();
+    tabs.push(t);
+    switchTab(t);
+}
+
+function removeTab(t) {
+    clearTimeout(t.timer);
+    t.token++;   // drop any calculation still running for it
+    if (tabs.length === 1) {
+        tabs = [newTab()];
+        active = tabs[0];
+    } else {
+        const i = tabs.indexOf(t);
+        tabs.splice(i, 1);
+        if (active === t) active = tabs[Math.max(0, i - 1)];
+    }
+    syncObservations();
     renderBands();
-    resetInputPanel();   // full reset: clears the measurement, manual input, image, and disables
-    updateObsList();     // Reset / New observation; refreshClearAllBtn (in resetInputPanel) greys this
+    loadTabIntoUI();
 }
 
-// ---- STEP INDICATOR ----
-
-function setStep(n) {
-    const pill  = document.getElementById('step-pill');
-    const instr = document.getElementById('step-instruction');
-    const fill  = document.getElementById('step-fill');
-
-    pill.classList.remove('complete');
-    instr.textContent = STEP_INSTRUCTIONS[n - 1];
-    fill.style.width = ((n - 1) / 5 * 100) + '%';
+function clearAll() {
+    tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
+    tabs = [newTab()];
+    active = tabs[0];
+    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
+    syncObservations();
+    renderBands();
+    loadTabIntoUI();
 }
 
-function setStepComplete() {
-    const pill  = document.getElementById('step-pill');
-    const instr = document.getElementById('step-instruction');
-    const fill  = document.getElementById('step-fill');
-
-    pill.classList.add('complete');
-    instr.textContent = 'Ready — press Calculate';
-    fill.style.width = '100%';
+function switchTab(t) {
+    if (t === active) return;
+    saveView();
+    active = t;
+    loadTabIntoUI();
 }
 
-setStep(1);
+// Shows the active tab on the left: photo, points, typed values, time and zone.
+function loadTabIntoUI() {
+    const t = active;
+    img = t.img;
+    points = t.points;
+    if (img) {
+        canvas.style.display = 'block';
+        overlay.style.display = 'none';
+        if (t.view) { fitCanvasToContainer(); ({ scale, offsetX, offsetY } = t.view); }
+        else fitImage();
+    } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.display = 'none';
+        overlay.style.display = '';
+    }
+    canvas.style.cursor = img && points.length < 3 ? 'crosshair' : 'default';
+    drawCanvas();
+    SEGS.forEach(s => { segEl[s].value = t.dt[s]; });
+    syncDtValidity();
+    syncModeToggle();
+    $('exif-card').style.display = 'none';
+    closeCalendar();
+    syncExifButton();
+    updateMeasureUI();
+    updateHint();
+    renderTabs();
+}
 
-// Clear browser-cached form values on every load
-document.getElementById('input-date').value = '';
-document.getElementById('input-time').value = '';
+function saveView() {
+    if (active && active.img) active.view = { scale, offsetX, offsetY };
+}
 
-// ---- IMAGE LOAD ----
+// ---- PHOTO ----
 
-function loadImage(file) {
+let img = null;
+let points = [];
+let scale = 1, offsetX = 0, offsetY = 0;
+let isPanning = false, panStartX = 0, panStartY = 0, panOffsetX = 0, panOffsetY = 0;
+let spaceHeld = false;
+
+// Loads a photo into a tab (the active one by default). A new photo is a new observation in
+// that tab, so its points and band are dropped; its EXIF capture time is used when there is one.
+function loadImage(file, tab = active) {
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
-        img = image;
-        points = [];
-        measureMode = false;
-        // dropping an image returns to click-measurement mode
-        manualMode = false;
-        document.getElementById('btn-manual').classList.remove('active-mode');
-        document.getElementById('manual-card').style.display = 'none';
-        fitImage();
-        canvas.style.display = 'block';
-        overlay.style.display = 'none';
-        document.getElementById('btn-reset').disabled = false;
-        refreshNewObsBtn();
-        refreshClearAllBtn();
-        setStep(2);
-        enterMeasureMode();
-        drawCanvas();
+        tab.img = image;
+        tab.fileName = file.name || '';
+        tab.points.length = 0;
+        tab.view = null;
+        tab.result = null; tab.noMatch = false; tab.framed = false;
+        syncObservations();
+        renderBands();
+        if (tab === active) loadTabIntoUI(); else renderTabs();
     };
     image.onerror = () => showToast('Could not load image.');
     image.src = url;
 
-    currentExif = null;
-    document.getElementById('exif-wrap').style.display = 'none';
+    tab.exif = null;
     exifr.parse(file, { tiff: true, exif: true, gps: true })
-        .then(exif => { currentExif = exif || null; })
-        .catch(() => { currentExif = null; })
-        .finally(() => { document.getElementById('exif-wrap').style.display = 'block'; });
+        .then(exif => { tab.exif = exif || null; })
+        .catch(() => { tab.exif = null; })
+        .finally(() => {
+            if (applyExifDateTime(tab, { quiet: false })) onInputChanged(tab);
+            if (tab === active) syncExifButton();
+        });
+}
+
+function fitCanvasToContainer() {
+    canvas.width  = container.clientWidth;
+    canvas.height = container.clientHeight;
 }
 
 function fitImage() {
-    const cw = container.clientWidth, ch = container.clientHeight;
-    const iw = img.naturalWidth,      ih = img.naturalHeight;
+    fitCanvasToContainer();
+    const cw = canvas.width, ch = canvas.height;
+    const iw = img.naturalWidth, ih = img.naturalHeight;
     scale = Math.min(cw / iw, ch / ih, 1);
     offsetX = (cw - iw * scale) / 2;
     offsetY = (ch - ih * scale) / 2;
-    canvas.width  = cw;
-    canvas.height = ch;
 }
 
-// ---- TRANSFORMS ----
-
-function imageToCanvas(ix, iy) {
-    return { x: offsetX + ix * scale, y: offsetY + iy * scale };
-}
-
-function canvasToImage(cx, cy) {
-    return { x: (cx - offsetX) / scale, y: (cy - offsetY) / scale };
-}
-
-// ---- DRAW ----
+function imageToCanvas(ix, iy) { return { x: offsetX + ix * scale, y: offsetY + iy * scale }; }
+function canvasToImage(cx, cy) { return { x: (cx - offsetX) / scale, y: (cy - offsetY) / scale }; }
 
 function drawCanvas() {
     if (!img) return;
@@ -312,11 +377,8 @@ function drawCanvas() {
     ctx.drawImage(img, 0, 0);
     ctx.restore();
     drawPoints();
-    if (points.length === 2) drawLine(points[0], points[1], POINT_COLORS[0], true);
-    if (points.length === 3) {
-        drawLine(points[0], points[1], POINT_COLORS[0], true);
-        drawLine(points[0], points[2], POINT_COLORS[2], true);
-    }
+    if (points.length >= 2) drawLine(points[0], points[1], POINT_COLORS[0]);
+    if (points.length === 3) drawLine(points[0], points[2], POINT_COLORS[2]);
 }
 
 function drawPoints() {
@@ -330,176 +392,151 @@ function drawPoints() {
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.stroke();
-
         ctx.beginPath();
         ctx.arc(cx, cy, 2, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.fill();
-
         ctx.font = 'bold 11px system-ui';
         ctx.fillStyle = color;
         ctx.fillText(POINT_LABELS[i], cx + 9, cy + 4);
     });
 }
 
-function drawLine(a, b, color, dashed) {
+function drawLine(a, b, color) {
     const A = imageToCanvas(a.x, a.y), B = imageToCanvas(b.x, b.y);
-    const ax = A.x, ay = A.y, bx = B.x, by = B.y;
     ctx.beginPath();
-    if (dashed) ctx.setLineDash([4, 3]);
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
+    ctx.setLineDash([4, 3]);
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
     ctx.strokeStyle = color + 'aa';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.setLineDash([]);
 }
 
-// ---- MEASURE MODE ----
-
-function enterMeasureMode() {
-    measureMode = true;
-    canvas.style.cursor = 'crosshair';
-}
-
-function exitMeasureMode() {
-    measureMode = false;
-    canvas.style.cursor = 'default';
-}
-
-document.getElementById('btn-reset').addEventListener('click', () => {
-    points = [];
-    manualMode = false;
-    document.getElementById('btn-manual').classList.remove('active-mode');
-    document.getElementById('manual-card').style.display = 'none';
-    document.getElementById('manual-h').value = '';
-    document.getElementById('manual-l').value = '';
-    exitMeasureMode();
-    drawCanvas();
-    document.getElementById('btn-calculate').disabled = true;
-    document.getElementById('input-date').value = '';
-    document.getElementById('input-time').value = '';
-    document.getElementById('measure-info').style.display = 'none';
-    document.getElementById('exif-card').style.display = 'none';
-    setStickyToast(null);
-    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
-    // Reset clears the current measurement only; saved observation bands stay, and the
-    // current band (if any) is still the one a re-measure + recalculate will replace.
-    setStep(img ? 2 : 1);
-    if (img) enterMeasureMode();
-    refreshNewObsBtn();
-    refreshClearAllBtn();
-});
-
-// Resets the left input panel to a clean slate: drops the image, clears the points, manual
-// input, date/time and the measurement pill. Bands already on the map are not touched.
-function resetInputPanel() {
-    img = null;
-    points = [];
-    currentExif = null;
-    manualMode = false;
-    editingCurrent = false;
-    document.getElementById('btn-manual').classList.remove('active-mode');
-    document.getElementById('manual-card').style.display = 'none';
-    document.getElementById('manual-h').value = '';
-    document.getElementById('manual-l').value = '';
-    exitMeasureMode();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    canvas.style.display = 'none';
-    overlay.style.display = '';
-    document.getElementById('btn-reset').disabled = true;
-    document.getElementById('btn-calculate').disabled = true;
-    document.getElementById('input-date').value = '';
-    document.getElementById('input-time').value = '';
-    document.getElementById('measure-info').style.display = 'none';
-    document.getElementById('exif-card').style.display = 'none';
-    document.getElementById('exif-wrap').style.display = 'none';
-    document.getElementById('file-picker').value = '';
-    setStickyToast(null);
-    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
-    setStep(1);
-    refreshNewObsBtn();
-    refreshClearAllBtn();
-}
-
-// "New observation" commits the current band (it stays on the map) and starts the next.
-document.getElementById('btn-new-image').addEventListener('click', resetInputPanel);
-
-document.getElementById('btn-clear-map').addEventListener('click', () => {
-    clearMap();
-});
-
-function paintOpacitySlider() {
-    const s = document.getElementById('opacity-slider');
-    const pct = (s.value - s.min) / (s.max - s.min) * 100;
-    s.style.background = `linear-gradient(to right, #ffb300 0%, #ffb300 ${pct}%, #5a5a5a ${pct}%, #5a5a5a 100%)`;
-}
-paintOpacitySlider();
-
-document.getElementById('opacity-slider').addEventListener('input', e => {
-    resultOpacity = parseFloat(e.target.value);
-    if (map.getLayer(BAND_LAYER)) map.setPaintProperty(BAND_LAYER, 'raster-opacity', resultOpacity);
-    paintOpacitySlider();
-});
-
-// ---- CANVAS CLICK (place points) ----
-
 canvas.addEventListener('click', e => {
-    if (!img || isPanning) return;
-
-    if (!measureMode) return;
+    if (!img || isPanning || spaceHeld || points.length >= 3) return;
     const rect = canvas.getBoundingClientRect();
     const { x: ix, y: iy } = canvasToImage(e.clientX - rect.left, e.clientY - rect.top);
-
     if (ix < 0 || iy < 0 || ix > img.naturalWidth || iy > img.naturalHeight) return;
-    if (points.length >= 3) return;
-
     points.push({ x: ix, y: iy });
+    if (points.length === 3) canvas.style.cursor = 'default';
     drawCanvas();
+    onInputChanged(active);
+    // Flow: three points done → straight on to the capture time if it is still missing.
+    if (points.length === 3 && dtEpoch(active) == null) focusFirstEmptySeg();
+});
 
-    if (points.length === 1) setStep(3);
-    else if (points.length === 2) setStep(4);
-    else if (points.length === 3) {
-        exitMeasureMode();
-        setStep(5);
-        checkDateTimeStep();
-        document.getElementById('btn-calculate').disabled = false;
-        updateMeasureInfo();
-        showToast('3 points set — enter date & time, then Calculate.', 'success');
+// Pan / zoom
+container.addEventListener('wheel', e => {
+    if (!img) return;
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const newScale = Math.max(0.1, Math.min(20, scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+    offsetX = mx - (mx - offsetX) * (newScale / scale);
+    offsetY = my - (my - offsetY) * (newScale / scale);
+    scale = newScale;
+    drawCanvas();
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+    if (e.button === 1 || (e.button === 0 && spaceHeld)) {
+        e.preventDefault();
+        isPanning = true;
+        panStartX = e.clientX; panStartY = e.clientY;
+        panOffsetX = offsetX;  panOffsetY = offsetY;
+        canvas.style.cursor = 'grab';
     }
+});
+window.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    offsetX = panOffsetX + (e.clientX - panStartX);
+    offsetY = panOffsetY + (e.clientY - panStartY);
+    drawCanvas();
+});
+window.addEventListener('mouseup', () => {
+    if (!isPanning) return;
+    // let the click that ends a pan pass without placing a point
+    setTimeout(() => { isPanning = false; }, 0);
+    canvas.style.cursor = img && points.length < 3 ? 'crosshair' : 'default';
+});
+
+const isTyping = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+window.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !isTyping(e.target)) { spaceHeld = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = false; });
+
+window.addEventListener('resize', () => {
+    if (!img) return;
+    fitImage();
+    drawCanvas();
+});
+
+// Drop: the first photo goes into the current tab (or a new one if this tab already has a
+// photo with a band), any further photos into new tabs, up to the cap.
+container.addEventListener('dragover', e => { e.preventDefault(); container.classList.add('drag-active'); });
+container.addEventListener('dragleave', () => container.classList.remove('drag-active'));
+container.addEventListener('drop', e => {
+    e.preventDefault();
+    container.classList.remove('drag-active');
+    const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+    if (!files.length) { showToast('Please drop an image file.'); return; }
+    loadFiles(files);
+});
+
+function loadFiles(files) {
+    let target = active;
+    files.forEach((f, i) => {
+        if (i > 0) {
+            if (tabs.length >= MAX_OBS) { if (i === files.length - 1) showToast('Three observations is the most that helps; extra photos were skipped.'); return; }
+            target = newTab();
+            tabs.push(target);
+        }
+        loadImage(f, target);
+    });
+    renderTabs();
+}
+
+$('btn-browse').addEventListener('click', () => $('file-picker').click());
+$('file-picker').addEventListener('change', e => {
+    const files = [...e.target.files].filter(f => f.type.startsWith('image/'));
+    if (files.length) loadFiles(files);
+    e.target.value = '';
+});
+
+// Paste a photo from the clipboard anywhere on the page (not while typing in a field).
+document.addEventListener('paste', e => {
+    if (isTyping(e.target)) return;
+    const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+    if (files.length) { e.preventDefault(); loadFiles(files); }
 });
 
 // ---- MEASUREMENTS & ANGLE QUALITY ----
 
-let manualMode = false;
+const parseNum = s => { const v = parseFloat(String(s).replace(',', '.')); return v > 0 ? v : null; };
 
-function getManualMeasurements() {
-    const h = parseFloat(document.getElementById('manual-h').value);
-    const l = parseFloat(document.getElementById('manual-l').value);
-    if (h > 0 && l > 0) return { h, s: l, angleDeg: 90, manual: true };
-    return null;
+// Height and shadow length of a tab: from its three points, else from the typed values.
+function getMeasurements(t) {
+    if (t.points.length === 3) {
+        const [b, top, tip] = t.points;
+        const vObj  = { x: top.x - b.x, y: top.y - b.y };
+        const vShad = { x: tip.x - b.x, y: tip.y - b.y };
+        const h = Math.hypot(vObj.x, vObj.y);
+        const s = Math.hypot(vShad.x, vShad.y);
+        if (s < 1 || h < 1) return null;
+        const cross = Math.abs(vObj.x * vShad.y - vObj.y * vShad.x);
+        const dot   = vObj.x * vShad.x + vObj.y * vShad.y;
+        return { h, s, angleDeg: Math.atan2(cross, dot) * 180 / Math.PI, fromPoints: true };
+    }
+    const h = parseNum(t.h), s = parseNum(t.l);
+    return h && s ? { h, s, fromPoints: false } : null;
 }
 
-function getMeasurements() {
-    if (manualMode) return getManualMeasurements();
-    if (points.length < 3) return null;
-    const vObj  = { x: points[1].x - points[0].x, y: points[1].y - points[0].y };
-    const vShad = { x: points[2].x - points[0].x, y: points[2].y - points[0].y };
-    const h = Math.hypot(vObj.x, vObj.y);
-    const s = Math.hypot(vShad.x, vShad.y);
-    const cross = Math.abs(vObj.x * vShad.y - vObj.y * vShad.x);
-    const dot   = vObj.x * vShad.x + vObj.y * vShad.y;
-    const angleDeg = Math.atan2(cross, dot) * 180 / Math.PI;   // 0..180° between the two vectors
-    return { h, s, angleDeg };
-}
-
-// Angle quality based on the displayed (rounded) degrees (symmetric around 90):
-//   88..92   -> good       (square to the camera, reliable)
-//   83..87 / 93..97 -> borderline (close, usable, expect some error)
-//   else     -> bad        (foreshortened, result will be wrong)
-// Asymmetric: the acute side (< 90°, shadow receding toward the horizon) is
-// heavily foreshortened and unreliable; the obtuse side (> 90°, shadow toward
-// the camera / foreground) is far more forgiving.
+// Angle quality based on the displayed (rounded) degrees. Asymmetric: the acute side (< 90°,
+// shadow receding toward the horizon) is heavily foreshortened and unreliable; the obtuse side
+// (> 90°, shadow toward the camera / foreground) is far more forgiving.
 function angleQuality(angleDeg) {
     const r = Math.round(angleDeg);
     if (r >= 88 && r <= 98) return 'good';
@@ -520,195 +557,280 @@ const ANGLE_MSG = {
 function applyAngleWarning(angleDeg) {
     const a = Math.round(angleDeg);
     const q = angleQuality(angleDeg);
-    if (q === 'bad')        setStickyToast(ANGLE_MSG.bad(a), 'error');
+    if (q === 'bad')             setStickyToast(ANGLE_MSG.bad(a), 'error');
     else if (q === 'borderline') setStickyToast(ANGLE_MSG.borderline(a), 'warn');
-    else                    setStickyToast(null);   // good — clear any lingering warning
+    else                         setStickyToast(null);
 }
 
-function updateMeasureInfo() {
-    const m = getMeasurements();
-    const info = document.getElementById('measure-info');
-    if (!m) { info.style.display = 'none'; setStickyToast(null); return; }
-
-    if (m.manual) {
-        // numbers entered directly — no in-image angle, no foreshortening warning
-        document.getElementById('measure-h').textContent = +m.h.toFixed(2) + '';
-        document.getElementById('measure-s').textContent = +m.s.toFixed(2) + '';
-        info.className = 'manual q-good';
-        info.style.display = 'flex';
+// H / L fields: they show the measured pixels once three points are set (read-only), and are
+// typed values otherwise.
+const inputH = $('input-h'), inputL = $('input-l');
+function updateMeasureUI() {
+    const t = active;
+    const field = $('hl-field');
+    const angEl = $('measure-angle');
+    const m = getMeasurements(t);
+    field.classList.remove('q-good', 'q-warn', 'q-bad', 'measured');
+    if (m && m.fromPoints) {
+        inputH.value = Math.round(m.h) + ' px';
+        inputL.value = Math.round(m.s) + ' px';
+        inputH.readOnly = inputL.readOnly = true;
+        const q = angleQuality(m.angleDeg);
+        const zone = q === 'good' ? 'good' : q === 'borderline' ? 'warn' : 'bad';
+        field.classList.add('measured', 'q-' + zone);
+        angEl.hidden = false;
+        angEl.textContent = '∠' + Math.round(m.angleDeg) + '°';
+        angEl.className = 'measure-angle zone-' + zone;
+        angEl.title = q === 'good'
+            ? 'Shadow is perpendicular to the object — measurement is reliable.'
+            : 'Click to see why this angle matters.';
+        applyAngleWarning(m.angleDeg);
+    } else {
+        inputH.readOnly = inputL.readOnly = false;
+        if (document.activeElement !== inputH) inputH.value = t.h;
+        if (document.activeElement !== inputL) inputL.value = t.l;
+        angEl.hidden = true;
         setStickyToast(null);
+    }
+}
+
+$('measure-angle').addEventListener('click', () => {
+    const m = getMeasurements(active);
+    if (!m || !m.fromPoints) return;
+    if (angleQuality(m.angleDeg) === 'good') showToast(ANGLE_MSG.good(Math.round(m.angleDeg)), 'success');
+    else applyAngleWarning(m.angleDeg);
+});
+
+[[inputH, 'h'], [inputL, 'l']].forEach(([el, key]) => {
+    el.addEventListener('input', () => {
+        if (el.readOnly) return;
+        el.value = el.value.replace(/[^\d.,]/g, '');
+        active[key] = el.value;
+        onInputChanged(active);
+    });
+    // Flow: Enter moves on — height → length → capture time.
+    el.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (el === inputH) inputL.focus();
+        else if (dtEpoch(active) == null) focusFirstEmptySeg();
+        else el.blur();
+    });
+});
+
+// ---- CAPTURE DATE & TIME ----
+//
+// Six small fields that behave as one: digits run on into the next part, ↑/↓ change the part
+// under the cursor, Backspace on an empty part steps back, and a pasted date fills them all.
+
+const SEGS = ['y', 'mo', 'd', 'h', 'mi', 's'];
+const SEG_LEN = { y: 4, mo: 2, d: 2, h: 2, mi: 2, s: 2 };
+const segEl = Object.fromEntries([...document.querySelectorAll('.dt-seg')].map(el => [el.dataset.seg, el]));
+const pad2 = v => String(v).padStart(2, '0');
+const daysInMonth = (y, mo) => new Date(Date.UTC(y, mo, 0)).getUTCDate();
+
+// Epoch ms of a tab's capture time (wall-clock digits as UTC), or null while incomplete/invalid.
+// Seconds may be left empty (= 0).
+function dtEpoch(t) {
+    const v = {};
+    for (const s of SEGS) {
+        if (t.dt[s] === '') { if (s === 's') { v.s = 0; continue; } return null; }
+        v[s] = +t.dt[s];
+    }
+    if (String(t.dt.y).length !== 4 || v.y < 1900 || v.y > 2100) return null;
+    if (v.mo < 1 || v.mo > 12 || v.d < 1 || v.d > daysInMonth(v.y, v.mo)) return null;
+    if (v.h > 23 || v.mi > 59 || v.s > 59) return null;
+    return Date.UTC(v.y, v.mo - 1, v.d, v.h, v.mi, v.s);
+}
+
+function dtFilled(t) { return SEGS.every(s => s === 's' || t.dt[s] !== ''); }
+
+function syncDtValidity() {
+    $('dt-field').classList.toggle('invalid', dtFilled(active) && dtEpoch(active) == null);
+    $('dt-field').classList.toggle('complete', dtEpoch(active) != null);
+}
+
+function setSeg(s, value) {
+    active.dt[s] = value;
+    segEl[s].value = value;
+}
+
+function focusSeg(s) { const el = segEl[s]; if (el) { el.focus(); el.select(); } }
+function focusFirstEmptySeg() { focusSeg(SEGS.find(s => active.dt[s] === '') || 'y'); }
+const nextSeg = s => SEGS[SEGS.indexOf(s) + 1];
+const prevSeg = s => SEGS[SEGS.indexOf(s) - 1];
+
+// A first digit that can't start a two-digit value (e.g. 4 for a month) completes the part.
+const SEG_FIRST_MAX = { mo: 1, d: 3, h: 2, mi: 5, s: 5 };
+
+function onDtChanged() {
+    syncDtValidity();
+    onInputChanged(active);
+}
+
+SEGS.forEach(s => {
+    const el = segEl[s];
+    el.addEventListener('focus', () => el.select());
+    el.addEventListener('input', () => {
+        // Digits beyond this part's length run on into the next parts, so fast typing or an
+        // inserted "20240621" fills year, month and day.
+        let digits = el.value.replace(/\D/g, '');
+        let seg = s, last = s;
+        while (seg) {
+            const len = SEG_LEN[seg];
+            let v, take;
+            if (seg !== 'y' && digits.length && +digits[0] > SEG_FIRST_MAX[seg]) { v = '0' + digits[0]; take = 1; }
+            else { v = digits.slice(0, len); take = v.length; }
+            digits = digits.slice(take);
+            setSeg(seg, v);
+            last = seg;
+            if (!digits.length || v.length < len) break;
+            seg = nextSeg(seg);
+        }
+        onDtChanged();
+        if (active.dt[last].length === SEG_LEN[last]) {
+            const n = nextSeg(last);
+            if (n) focusSeg(n); else segEl[last].blur();
+        } else if (last !== s) focusSeg(last);
+    });
+    el.addEventListener('blur', () => {
+        if (s !== 'y' && el.value.length === 1) { setSeg(s, '0' + el.value); onDtChanged(); }
+    });
+    el.addEventListener('keydown', e => {
+        const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+        const atEnd = el.selectionStart === el.value.length;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            stepSeg(s, e.key === 'ArrowUp' ? 1 : -1);
+        } else if (e.key === 'Backspace' && el.value === '') {
+            e.preventDefault();
+            const p = prevSeg(s); if (p) focusSeg(p);
+        } else if (e.key === 'ArrowLeft' && atStart) {
+            const p = prevSeg(s); if (p) { e.preventDefault(); focusSeg(p); }
+        } else if (e.key === 'ArrowRight' && atEnd) {
+            const n = nextSeg(s); if (n) { e.preventDefault(); focusSeg(n); }
+        } else if (['-', ':', ' ', '/', '.', 'T', 't'].includes(e.key)) {
+            // a typed separator finishes the part
+            e.preventDefault();
+            if (s !== 'y' && el.value.length === 1) { setSeg(s, '0' + el.value); onDtChanged(); }
+            const n = nextSeg(s); if (n && el.value) focusSeg(n);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            el.blur();
+            if (dtEpoch(active) == null) focusFirstEmptySeg();
+        }
+    });
+    el.addEventListener('paste', e => {
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        if (applyDateText(text)) { e.preventDefault(); onDtChanged(); segEl.s.blur(); }
+    });
+});
+
+// Fills the fields from a pasted date: ISO (2024-06-21T09:00:00), EXIF (2024:06:21 09:00:00)
+// or with slashes / dots; a date alone fills only the date.
+function applyDateText(text) {
+    const m = String(text).trim().match(/^(\d{4})[-:/.](\d{1,2})[-:/.](\d{1,2})(?:[ T]+(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?/);
+    if (!m) return false;
+    setSeg('y', m[1]); setSeg('mo', pad2(m[2])); setSeg('d', pad2(m[3]));
+    if (m[4] != null) { setSeg('h', pad2(m[4])); setSeg('mi', m[5]); setSeg('s', m[6] ?? '00'); }
+    return true;
+}
+
+function stepSeg(s, dir) {
+    const now = new Date();
+    const t = active;
+    const cur = t.dt[s] === '' ? null : +t.dt[s];
+    const y = +t.dt.y || now.getFullYear(), mo = +t.dt.mo || now.getMonth() + 1;
+    const range = { y: [1900, 2100], mo: [1, 12], d: [1, daysInMonth(y, mo)], h: [0, 23], mi: [0, 59], s: [0, 59] }[s];
+    const start = { y: now.getFullYear(), mo: now.getMonth() + 1, d: now.getDate(), h: 12, mi: 0, s: 0 }[s];
+    let v = cur == null ? start : cur + dir;
+    if (s === 'y') v = Math.min(range[1], Math.max(range[0], v));
+    else if (v > range[1]) v = range[0];
+    else if (v < range[0]) v = range[1];
+    setSeg(s, s === 'y' ? String(v) : pad2(v));
+    segEl[s].select();
+    onDtChanged();
+}
+
+// Calendar: stays on the days of one month; the arrows change month («/» a year).
+let calY = 0, calM = 0;   // month shown, M = 1..12
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function openCalendar() {
+    const t = active, now = new Date();
+    calY = (String(t.dt.y).length === 4 ? +t.dt.y : now.getFullYear());
+    calM = (+t.dt.mo >= 1 && +t.dt.mo <= 12) ? +t.dt.mo : now.getMonth() + 1;
+    renderCalendar();
+    $('cal-pop').style.display = 'block';
+}
+function closeCalendar() { $('cal-pop').style.display = 'none'; }
+
+function renderCalendar() {
+    const pop = $('cal-pop');
+    const first = new Date(Date.UTC(calY, calM - 1, 1)).getUTCDay();   // 0 = Sunday
+    const lead = (first + 6) % 7;                                       // weeks start on Monday
+    const n = daysInMonth(calY, calM);
+    const sel = (+active.dt.y === calY && +active.dt.mo === calM) ? +active.dt.d : 0;
+    const now = new Date();
+    const today = (now.getFullYear() === calY && now.getMonth() + 1 === calM) ? now.getDate() : 0;
+    let cells = '';
+    for (let i = 0; i < lead; i++) cells += '<span></span>';
+    for (let d = 1; d <= n; d++) {
+        cells += `<button type="button" class="cal-day${d === sel ? ' selected' : ''}${d === today ? ' today' : ''}" data-day="${d}">${d}</button>`;
+    }
+    pop.innerHTML =
+        `<div class="cal-head">` +
+            `<button type="button" data-nav="-12" title="Previous year">«</button>` +
+            `<button type="button" data-nav="-1" title="Previous month">‹</button>` +
+            `<span class="cal-title">${MONTHS[calM - 1]} ${calY}</span>` +
+            `<button type="button" data-nav="1" title="Next month">›</button>` +
+            `<button type="button" data-nav="12" title="Next year">»</button>` +
+        `</div>` +
+        `<div class="cal-grid">` +
+            ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(w => `<span class="cal-wd">${w}</span>`).join('') +
+            cells +
+        `</div>`;
+}
+
+$('btn-calendar').addEventListener('click', e => {
+    e.stopPropagation();
+    if ($('cal-pop').style.display === 'none') openCalendar(); else closeCalendar();
+});
+$('cal-pop').addEventListener('click', e => {
+    e.stopPropagation();
+    const nav = e.target.closest('[data-nav]');
+    if (nav) {
+        const k = calY * 12 + (calM - 1) + +nav.dataset.nav;
+        calY = Math.floor(k / 12); calM = k % 12 + 1;
+        renderCalendar();
         return;
     }
-
-    document.getElementById('measure-h').textContent = Math.round(m.h) + 'px';
-    document.getElementById('measure-s').textContent = Math.round(m.s) + 'px';
-
-    const angEl = document.getElementById('measure-angle');
-    const q = angleQuality(m.angleDeg);
-    const zone = q === 'good' ? 'good' : q === 'borderline' ? 'warn' : 'bad';
-    angEl.textContent = '∠' + Math.round(m.angleDeg) + '°';
-    angEl.className = 'measure-angle zone-' + zone;
-    angEl.title = q === 'good'
-        ? 'Shadow is perpendicular to the object — measurement is reliable.'
-        : 'Click to see why this angle matters.';
-
-    info.className = 'q-' + zone;
-    info.style.display = 'flex';
-    applyAngleWarning(m.angleDeg);
-}
-
-document.getElementById('measure-angle').addEventListener('click', () => {
-    const m = getMeasurements();
-    if (!m) return;
-    if (m.manual) return;
-    const a = Math.round(m.angleDeg);
-    const q = angleQuality(m.angleDeg);
-    if (q === 'good') showToast(ANGLE_MSG.good(a), 'success');
-    else applyAngleWarning(m.angleDeg);   // re-show the lingering warning if it was dismissed
-});
-
-// ---- MANUAL INPUT MODE ----
-
-function manualCardOpen() {
-    return document.getElementById('manual-card').style.display !== 'none';
-}
-
-function openManual() {
-    manualMode = true;
-    document.getElementById('manual-card').style.display = 'block';
-    document.getElementById('btn-manual').classList.add('active-mode');
-    document.getElementById('step-pill').classList.remove('complete');
-    document.getElementById('step-instruction').textContent = 'Manual input — enter height & length';
-    document.getElementById('step-fill').style.width = '50%';
-    document.getElementById('btn-calculate').disabled = !getManualMeasurements();
-    updateMeasureInfo();
-    checkDateTimeStep();
-}
-
-// keepMode=true when confirming (OK / Manual toggle); false when cancelling (×)
-function closeManual(keepMode) {
-    document.getElementById('manual-card').style.display = 'none';
-    const valid = !!getManualMeasurements();
-    if (keepMode && valid) {
-        manualMode = true;
-        document.getElementById('btn-manual').classList.add('active-mode');
-        document.getElementById('btn-calculate').disabled = false;
-    } else {
-        manualMode = false;
-        document.getElementById('btn-manual').classList.remove('active-mode');
-        document.getElementById('btn-calculate').disabled = points.length < 3;
-        setStep(points.length >= 3 ? 5 : (img ? 2 : 1));
-    }
-    updateMeasureInfo();
-    checkDateTimeStep();
-}
-
-function onManualInput() {
-    if (!manualMode) return;
-    document.getElementById('btn-calculate').disabled = !getManualMeasurements();
-    updateMeasureInfo();
-    checkDateTimeStep();
-    refreshClearAllBtn();
-}
-
-document.getElementById('btn-manual').addEventListener('click', () => {
-    if (manualCardOpen()) closeManual(true); else openManual();
-});
-document.getElementById('btn-manual-ok').addEventListener('click', () => closeManual(true));
-document.getElementById('btn-manual-close').addEventListener('click', () => closeManual(false));
-document.getElementById('manual-h').addEventListener('input', onManualInput);
-document.getElementById('manual-l').addEventListener('input', onManualInput);
-
-// ---- PAN / ZOOM ----
-
-container.addEventListener('wheel', e => {
-    if (!img) return;
-    e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = Math.max(0.1, Math.min(20, scale * factor));
-    offsetX = mx - (mx - offsetX) * (newScale / scale);
-    offsetY = my - (my - offsetY) * (newScale / scale);
-    scale = newScale;
-    drawCanvas();
-}, { passive: false });
-
-canvas.addEventListener('mousedown', e => {
-    if (e.button === 1 || (e.button === 0 && e.getModifierState('Space'))) {
-        e.preventDefault();
-        isPanning = true;
-        panStartX = e.clientX; panStartY = e.clientY;
-        panOffsetX = offsetX;  panOffsetY = offsetY;
-        canvas.style.cursor = 'grab';
+    const day = e.target.closest('[data-day]');
+    if (day) {
+        setSeg('y', String(calY)); setSeg('mo', pad2(calM)); setSeg('d', pad2(+day.dataset.day));
+        closeCalendar();
+        onDtChanged();
+        // Flow: day picked → on to the time
+        if (active.dt.h === '') focusSeg('h');
     }
 });
+document.addEventListener('click', e => { if (!$('dt-wrap').contains(e.target)) closeCalendar(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCalendar(); });
 
-window.addEventListener('mousemove', e => {
-    if (!isPanning) return;
-    offsetX = panOffsetX + (e.clientX - panStartX);
-    offsetY = panOffsetY + (e.clientY - panStartY);
-    drawCanvas();
-});
-
-window.addEventListener('mouseup', e => {
-    if (isPanning) {
-        isPanning = false;
-        canvas.style.cursor = measureMode ? 'crosshair' : 'default';
-    }
-});
-
-window.addEventListener('keydown', e => { if (e.code === 'Space') e.preventDefault(); });
-
-window.addEventListener('resize', () => {
-    if (!img) return;
-    fitImage();
-    drawCanvas();
-});
-
-// ---- DRAG & DROP ----
-
-container.addEventListener('dragover', e => {
-    e.preventDefault();
-    container.classList.add('drag-active');
-});
-container.addEventListener('dragleave', () => container.classList.remove('drag-active'));
-container.addEventListener('drop', e => {
-    e.preventDefault();
-    container.classList.remove('drag-active');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) loadImage(file);
-    else showToast('Please drop an image file.');
-});
-
-document.getElementById('btn-browse').addEventListener('click', () => {
-    document.getElementById('file-picker').click();
-});
-document.getElementById('file-picker').addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (file) loadImage(file);
-});
-
-// ---- STEP 5: DATE/TIME FILLED ----
-
-function checkDateTimeStep() {
-    const dateVal = document.getElementById('input-date').value;
-    const timeVal = document.getElementById('input-time').value;
-    const ready = manualMode ? !!getManualMeasurements() : points.length >= 3;
-    if (ready && dateVal && timeVal) {
-        setStepComplete();
-    }
+// UTC / Local
+function syncModeToggle() {
+    document.querySelectorAll('#tz-toggle .toggle-btn').forEach(b =>
+        b.classList.toggle('active-toggle', b.dataset.mode === active.mode));
 }
-// 'input' (not just 'change') so Clear all lights up as soon as a date or time is typed.
-['input-date', 'input-time'].forEach(id => {
-    document.getElementById(id).addEventListener('input', () => { checkDateTimeStep(); refreshClearAllBtn(); });
-});
+document.querySelectorAll('#tz-toggle .toggle-btn').forEach(b => b.addEventListener('click', () => {
+    if (active.mode === b.dataset.mode) return;
+    active.mode = b.dataset.mode;
+    active.framed = false;   // a band in the other time basis is a different shape
+    syncModeToggle();
+    onInputChanged(active);
+}));
 
 // ---- EXIF ----
-
-let currentExif = null;
-let exifGpsMarker = null;
 
 function pick(obj, ...keys) {
     for (const k of keys) if (obj[k] != null) return obj[k];
@@ -735,10 +857,18 @@ function dmsToDecimal(dms) {
     return dms[0] + dms[1] / 60 + dms[2] / 3600;
 }
 
-function applyExifDateTime() {
-    if (!currentExif) return;
-    const raw = pick(currentExif, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
-    if (!raw) return;
+function exifGps(e) {
+    const lat = dmsToDecimal(e?.GPSLatitude), lng = dmsToDecimal(e?.GPSLongitude);
+    if (lat == null || lng == null) return null;
+    return { lat: e.GPSLatitudeRef === 'S' ? -lat : lat, lng: e.GPSLongitudeRef === 'W' ? -lng : lng };
+}
+
+// Copies the photo's EXIF capture time into a tab's date/time and zone. Returns true when it did.
+function applyExifDateTime(tab = active, { quiet = true } = {}) {
+    const ex = tab.exif;
+    if (!ex) return false;
+    const raw = pick(ex, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
+    if (!raw) return false;
     let year, month, day, hour, minute, second = 0;
 
     if (raw instanceof Date) {
@@ -748,49 +878,42 @@ function applyExifDateTime() {
         hour = raw.getHours(); minute = raw.getMinutes(); second = raw.getSeconds();
     } else if (typeof raw === 'string') {
         const m = raw.match(/^(\d{4})[: -](\d{2})[: -](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-        if (!m) return;
+        if (!m) return false;
         year = +m[1]; month = +m[2]; day = +m[3];
         hour = +m[4]; minute = +m[5]; second = m[6] ? +m[6] : 0;
-    } else return;
+    } else return false;
 
     // An EXIF offset tag means the stored wall-clock is local time; with no offset we take
     // the value as already UTC (e.g. images prepared with the capture time written in UTC).
-    const offsetStr = pick(currentExif, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
+    const offsetStr = pick(ex, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
     const useLocal = typeof offsetStr === 'string' && /[+-]\d{2}:\d{2}/.test(offsetStr);
 
-    document.getElementById('input-date').value =
-        `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    document.getElementById('input-time').value =
-        `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}:${String(second).padStart(2,'0')}`;
-
-    if (useLocal) {
-        timeFormat = 'local';
-        document.getElementById('btn-local').classList.add('active-toggle');
-        document.getElementById('btn-utc').classList.remove('active-toggle');
-    } else {
-        timeFormat = 'utc';
-        document.getElementById('btn-utc').classList.add('active-toggle');
-        document.getElementById('btn-local').classList.remove('active-toggle');
+    tab.dt = { y: String(year), mo: pad2(month), d: pad2(day), h: pad2(hour), mi: pad2(minute), s: pad2(second) };
+    tab.mode = useLocal ? 'local' : 'utc';
+    if (tab === active) {
+        SEGS.forEach(s => { segEl[s].value = tab.dt[s]; });
+        syncDtValidity();
+        syncModeToggle();
     }
-    checkDateTimeStep();
-    document.getElementById('exif-card').style.display = 'none';
+    if (!quiet) showToast(`Date and time taken from the photo's EXIF (${useLocal ? 'local time' : 'UTC'}). Check them before relying on the result.`, 'success');
+    return true;
+}
+
+function syncExifButton() {
+    const ex = active.exif;
+    $('btn-exif').disabled = !active.img;
+    $('exif-dot').hidden = !(ex && (pick(ex, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime') || exifGps(ex)));
 }
 
 function renderExifCard() {
-    const card = document.getElementById('exif-card');
-    if (!currentExif) {
+    const card = $('exif-card');
+    const e = active.exif;
+    if (!e) {
         card.innerHTML = '<p class="exif-empty">No metadata found in this image.</p>';
         return;
     }
     try {
-        const e = currentExif;
-        const lat = dmsToDecimal(e.GPSLatitude);
-        const lng = dmsToDecimal(e.GPSLongitude);
-        const latRef = e.GPSLatitudeRef;
-        const lngRef = e.GPSLongitudeRef;
-        const adjLat = lat != null ? (latRef === 'S' ? -lat : lat) : null;
-        const adjLng = lng != null ? (lngRef === 'W' ? -lng : lng) : null;
-
+        const gps = exifGps(e);
         const date = pick(e, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
         const rows = [
             ['Date',       formatExifDate(date)],
@@ -800,16 +923,14 @@ function renderExifCard() {
             ['Aperture',   pick(e,'FNumber') != null ? `f/${e.FNumber}` : null],
             ['Shutter',    pick(e,'ExposureTime') != null ? `${e.ExposureTime < 1 ? '1/'+ Math.round(1/e.ExposureTime) : e.ExposureTime} s` : null],
             ['ISO',        pick(e,'ISO','ISOSpeedRatings')],
-            ['GPS',        adjLat != null && adjLng != null ? `${adjLat.toFixed(5)}, ${adjLng.toFixed(5)}` : null],
+            ['GPS',        gps ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : null],
         ].filter(r => r[1] != null);
 
         const copyIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M2 11V2h9"/></svg>`;
-
         const tableRows = rows.map(([k, v]) => k === 'GPS'
             ? `<tr><td>${escHtml(k)}</td><td>${escHtml(v)}<button class="exif-copy-btn" data-coords="${escHtml(v)}" title="Copy coordinates">${copyIcon}</button></td></tr>`
             : `<tr><td>${escHtml(k)}</td><td>${escHtml(v)}</td></tr>`
         ).join('');
-
         const crosshair = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
             <circle cx="8" cy="8" r="3"/>
             <line x1="8" y1="1" x2="8" y2="4.5"/>
@@ -817,28 +938,24 @@ function renderExifCard() {
             <line x1="1" y1="8" x2="4.5" y2="8"/>
             <line x1="11.5" y1="8" x2="15" y2="8"/>
         </svg>`;
-
-        const useBtn  = date
-            ? `<button class="exif-use-btn" id="btn-exif-use-dt">Use this date &amp; time</button>`
-            : '';
-        const gpsBtn  = adjLat != null && adjLng != null
-            ? `<button class="exif-gps-btn" id="btn-exif-gps">${crosshair}Show on map</button>`
-            : '';
+        const useBtn = date ? `<button class="exif-use-btn" id="btn-exif-use-dt">Use this date &amp; time</button>` : '';
+        const gpsBtn = gps ? `<button class="exif-gps-btn" id="btn-exif-gps">${crosshair}Show on map</button>` : '';
 
         card.innerHTML =
             '<div class="exif-card-header">Image metadata</div>' +
             (rows.length ? `<table class="exif-table">${tableRows}</table>` : '<p class="exif-empty">No relevant metadata found.</p>') +
             useBtn + gpsBtn;
 
-        card.querySelector('#btn-exif-use-dt')?.addEventListener('click', applyExifDateTime);
+        card.querySelector('#btn-exif-use-dt')?.addEventListener('click', () => {
+            if (applyExifDateTime(active)) onInputChanged(active);
+            card.style.display = 'none';
+        });
         card.querySelector('#btn-exif-gps')?.addEventListener('click', () => {
-            goToExifGps(adjLat, adjLng);
-            document.getElementById('exif-card').style.display = 'none';
+            goToExifGps(gps.lat, gps.lng);
+            card.style.display = 'none';
         });
         card.querySelectorAll('.exif-copy-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                navigator.clipboard.writeText(btn.dataset.coords).catch(() => {});
-            });
+            btn.addEventListener('click', () => navigator.clipboard.writeText(btn.dataset.coords).catch(() => {}));
         });
     } catch {
         card.innerHTML = '<p class="exif-empty">Could not read metadata.</p>';
@@ -875,85 +992,147 @@ document.addEventListener('click', e => {
     if (btn) navigator.clipboard.writeText(btn.dataset.coords).catch(() => {});
 });
 
-document.getElementById('btn-exif').addEventListener('click', e => {
+$('btn-exif').addEventListener('click', e => {
     e.stopPropagation();
-    const card = document.getElementById('exif-card');
-    const open = card.style.display !== 'none';
-    if (open) { card.style.display = 'none'; } else { renderExifCard(); card.style.display = 'block'; }
+    const card = $('exif-card');
+    if (card.style.display !== 'none') card.style.display = 'none';
+    else { renderExifCard(); card.style.display = 'block'; }
 });
-
 document.addEventListener('click', e => {
-    const wrap = document.getElementById('exif-wrap');
-    if (!wrap.contains(e.target)) document.getElementById('exif-card').style.display = 'none';
+    if (!$('exif-wrap').contains(e.target)) $('exif-card').style.display = 'none';
 });
 
-// ---- UTC / LOCAL TOGGLE ----
+// ---- MENU (one menu for the left side) ----
 
-let timeFormat = 'utc';
+function menuItems() {
+    const t = active;
+    const hasMeasurement = t.points.length > 0 || t.h !== '' || t.l !== '';
+    const anything = tabs.length > 1 || t.img || hasMeasurement || SEGS.some(s => t.dt[s] !== '');
+    return [
+        { label: 'New observation', hint: 'The same place at another time', disabled: tabs.length >= MAX_OBS, run: addTab },
+        { label: 'Reset measurement', hint: 'Clear the points or typed values of this observation', disabled: !hasMeasurement, run: resetMeasurement },
+        { label: 'Remove this observation', disabled: !anything, run: () => removeTab(active) },
+        { sep: true },
+        { label: 'Clear all', hint: 'Remove every observation and band', disabled: !anything && !observations.length, run: clearAll, danger: true },
+    ];
+}
 
-document.getElementById('btn-utc').addEventListener('click', () => {
-    timeFormat = 'utc';
-    document.getElementById('btn-utc').classList.add('active-toggle');
-    document.getElementById('btn-local').classList.remove('active-toggle');
-});
-document.getElementById('btn-local').addEventListener('click', () => {
-    timeFormat = 'local';
-    document.getElementById('btn-local').classList.add('active-toggle');
-    document.getElementById('btn-utc').classList.remove('active-toggle');
-});
+function renderMenu() {
+    const menu = $('app-menu');
+    menu.innerHTML = '';
+    menuItems().forEach(it => {
+        if (it.sep) { const s = document.createElement('div'); s.className = 'session-sep'; menu.appendChild(s); return; }
+        const el = document.createElement('div');
+        el.className = 'session-item' + (it.disabled ? ' disabled' : '') + (it.danger ? ' danger' : '');
+        el.setAttribute('role', 'menuitem');
+        el.textContent = it.label;
+        if (it.hint) el.title = it.hint;
+        if (!it.disabled) el.addEventListener('click', () => { openMenu(false); it.run(); });
+        menu.appendChild(el);
+    });
+}
 
-// ---- HELP ----
+function openMenu(show) {
+    if (show) renderMenu();
+    $('app-menu').style.display = show ? 'block' : 'none';
+    $('btn-menu').setAttribute('aria-expanded', String(show));
+}
+$('btn-menu').addEventListener('click', e => { e.stopPropagation(); openMenu($('app-menu').style.display === 'none'); });
+document.addEventListener('click', e => { if (!$('menu-wrap').contains(e.target)) openMenu(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') openMenu(false); });
 
-document.getElementById('btn-help').addEventListener('click', () => {
-    const card = document.getElementById('help-card');
-    card.style.display = card.style.display === 'none' ? 'block' : 'none';
-});
-document.getElementById('btn-help-close').addEventListener('click', () => {
-    document.getElementById('help-card').style.display = 'none';
-});
+function resetMeasurement() {
+    const t = active;
+    t.points.length = 0;
+    t.h = ''; t.l = '';
+    t.result = null; t.noMatch = false; t.framed = false;
+    clearTimeout(t.timer); t.token++;
+    syncObservations();
+    renderBands();
+    canvas.style.cursor = img ? 'crosshair' : 'default';
+    drawCanvas();
+    updateMeasureUI();
+    updateHint();
+    renderTabs();
+}
 
-// ---- CALCULATE ----
+// ---- STEP HINT ----
 
-document.getElementById('btn-calculate').addEventListener('click', () => {
-    // Recalculating the current band (editingCurrent) is always allowed; only starting a
-    // brand-new band is capped.
-    if (!editingCurrent && observations.length >= MAX_OBS) {
-        showToast('Three observations is the most that helps. Remove one to add another.');
-        return;
+function updateHint() {
+    const t = active;
+    const el = $('step-hint');
+    const m = getMeasurements(t);
+    let text, cls = '';
+    if (t.busy) { text = 'Calculating…'; cls = 'busy'; }
+    else if (!t.img && !m) text = 'Drop or paste a photo, or type the height and shadow length';
+    else if (t.img && !m && t.points.length < 3) {
+        text = `<i style="background:${POINT_COLORS[t.points.length]}"></i>${POINT_HINTS[t.points.length]}`;
     }
-
-    const dateVal = document.getElementById('input-date').value;
-    const timeVal = document.getElementById('input-time').value;
-
-    if (!dateVal || !timeVal) {
-        showToast('Please enter a date and time.');
-        return;
+    else if (!m) { text = 'Shadow length is too short — reset and mark the points again'; cls = 'bad'; }
+    else if (dtEpoch(t) == null) text = dtFilled(t) ? 'That date or time does not exist — check it' : 'Enter the capture date and time';
+    else if (t.noMatch) { text = 'No place on Earth matches these inputs'; cls = 'bad'; }
+    else if (t.result) {
+        const alt = Math.atan2(t.result.h, t.result.s) * 180 / Math.PI;
+        text = `Band on the map · sun ${alt.toFixed(1)}° above the horizon`;
+        cls = 'done';
     }
-    if (!manualMode && points.length < 3) {
-        showToast('Please mark all 3 points on the image first.');
-        return;
+    else text = 'Calculating…';
+    el.innerHTML = text;
+    el.className = 'step-hint ' + cls;
+}
+
+// ---- AUTO-CALCULATE ----
+
+// Called after any change to a tab's input: refreshes the left side and recalculates the band
+// shortly after typing stops, once the input is complete.
+function onInputChanged(t) {
+    if (t === active) { updateMeasureUI(); updateHint(); }
+    clearTimeout(t.timer);
+    if (!getMeasurements(t) || dtEpoch(t) == null) return;
+    t.timer = setTimeout(() => calculateTab(t), 350);
+}
+
+async function calculateTab(t) {
+    const m = getMeasurements(t);
+    const baseEpochMs = dtEpoch(t);
+    if (!m || baseEpochMs == null) return;
+    const token = ++t.token;
+    t.busy = true;
+    if (t === active) updateHint();
+    renderTabs();
+    try {
+        const tzGrid = t.mode === 'local' ? await loadTzGrid(new Date(baseEpochMs)) : null;
+        await new Promise(r => setTimeout(r, 20));   // let "Calculating…" paint
+        if (token !== t.token || !tabs.includes(t)) return;
+        const { grid, count } = findShadows(baseEpochMs, m.h, m.s, t.mode, tzGrid);
+        t.noMatch = !count;
+        t.result = count ? {
+            id: t.id, label: formatObsLabel(baseEpochMs, t.mode),
+            baseEpochMs, mode: t.mode, h: m.h, s: m.s, grid,
+        } : null;
+        syncObservations();
+        await renderBands();
+        if (count) {
+            // The first result of a tab turns the map: to the overlap once there are two or more
+            // bands, else to the ring's centre (where the sun is overhead). Local-mode bands are
+            // not rings, so they, and every later update, just pulse.
+            const overlap = overlapCount();
+            if (!t.framed && observations.length >= 2 && overlap > 0) frameOverlap();
+            else if (!t.framed && observations.length === 1 && t.mode === 'utc') frameBand(grid);
+            else pulseBand();
+            t.framed = true;
+            if (overlap === 0) {
+                showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
+            }
+        }
+    } catch (err) {
+        showToast('Calculation failed: ' + err.message);
+    } finally {
+        if (token === t.token) t.busy = false;
+        if (t === active) updateHint();
+        renderTabs();
     }
-
-    const m = getMeasurements();
-    if (!m) {
-        showToast('Enter a height and a shadow length.');
-        return;
-    }
-
-    const [year, month, day]       = dateVal.split('-').map(Number);
-    const [hour, minute, second = 0] = timeVal.split(':').map(Number);
-    const baseEpochMs = Date.UTC(year, month - 1, day, hour, minute, second);
-
-    const objectHeight = m.h;
-    const shadowLength = m.s;
-
-    if (!manualMode && shadowLength < 1) {
-        showToast('Shadow length is too short — check your points.');
-        return;
-    }
-
-    runAnalysis(baseEpochMs, objectHeight, shadowLength, timeFormat);
-});
+}
 
 // ---- TIMEZONE GRID ----
 
@@ -981,57 +1160,10 @@ function getTzOffsetMinutes(tzName, date) {
             hour12: false
         }).format(date);
         const localMs = new Date(localStr.replace(' ', 'T') + 'Z').getTime();
-        const offset = Math.round((localMs - date.getTime()) / 60000);
-        return offset;
+        return Math.round((localMs - date.getTime()) / 60000);
     } catch {
         return 0;
     }
-}
-
-// ---- ANALYSIS ----
-
-async function runAnalysis(baseEpochMs, objectHeight, shadowLength, mode) {
-    document.getElementById('btn-calculate').disabled = true;
-    document.getElementById('btn-calculate').textContent = 'Calculating…';
-
-    try {
-        let tzGrid = null;
-        if (mode === 'local') {
-            tzGrid = await loadTzGrid(new Date(baseEpochMs));
-        }
-        await new Promise(r => setTimeout(r, 20));
-        const { grid, dayGrid, count } = findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid);
-        if (!count) {
-            showToast('No matching locations found for these inputs.');
-        } else {
-            // Recalculating the current band replaces it in place; otherwise this is a new band.
-            const replacing = editingCurrent && observations.length > 0;
-            const obs = {
-                id: replacing ? observations[observations.length - 1].id : Date.now(),
-                label: formatObsLabel(baseEpochMs, mode),
-                baseEpochMs, mode, h: objectHeight, s: shadowLength, grid, dayGrid,
-            };
-            if (replacing) {
-                observations[observations.length - 1] = obs;
-            } else {
-                observations.push(obs);
-                editingCurrent = true;   // the just-added band is now the current one
-            }
-            renderBands();
-            updateObsList();
-            refreshNewObsBtn();
-            if (!replacing && observations.length === 1) frameBand(obs.grid);
-            if (observations.length >= 2 && overlapCount() === 0) {
-                showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
-            }
-        }
-    } catch (err) {
-        showToast('Calculation failed: ' + err.message);
-    }
-
-    document.getElementById('btn-calculate').disabled = false;
-    document.getElementById('btn-calculate').textContent = 'Calculate';
-    checkDateTimeStep();
 }
 
 // ---- SHADOW MATH ----
@@ -1050,9 +1182,6 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
     // interpolated between cells (Infinity = sun below the horizon). A cell is in the band
     // when its error is below MATCH_TOL. One grid per observation.
     const grid = new Float32Array(lats.length * numLons).fill(Infinity);
-    // Day/night wash only makes sense for a single UTC instant.
-    // In local mode every point is at its own clock time, so skip it.
-    const dayGrid = (mode === 'local') ? null : new Uint8Array(lats.length * numLons);
     let count = 0;
 
     for (let i = 0; i < lats.length; i++) {
@@ -1068,42 +1197,38 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
                 dt = new Date(baseEpochMs);
             }
 
-            const pos = SunCalc.getPosition(dt, lat, lon);
-            const alt = pos.altitude;
+            const alt = SunCalc.getPosition(dt, lat, lon).altitude;
             if (alt <= 0) continue;
-
-            if (dayGrid) dayGrid[i * numLons + j] = 1;
 
             const calcShadow = objectHeight / Math.tan(alt);
             const diff = Math.abs(calcShadow - shadowLength) / shadowLength;
-
             grid[i * numLons + j] = diff;
             if (diff < MATCH_TOL) count++;
         }
     }
 
-    return { grid, dayGrid, count };
+    return { grid, count };
 }
 
-// ---- RENDER HEATMAP ----
+// ---- RENDER: BANDS AND DAYLIGHT ----
 
-// The bands are painted once into an image pinned to the grid's lat/lon box, and MapLibre
-// drapes that image over the globe like any other map layer, so it moves, zooms and wraps
-// with the map. MapLibre stretches an image evenly in Web Mercator between its corners, so
-// the image rows are spaced in Mercator y and each row is filled from the grid row at its
-// latitude.
-const BAND_SOURCE = 'bands';
-const BAND_LAYER  = 'bands';
-const BAND_IMG_W  = 1440;   // 2 px per 0.5° grid column
+// Bands and the daylight wash are painted into images pinned to lat/lon boxes, which MapLibre
+// drapes over the globe (or flat map) like any other layer. MapLibre stretches an image evenly
+// in Web Mercator between its corners, so image rows are spaced in Mercator y.
+const BAND_SOURCE = 'bands', BAND_LAYER = 'bands';
+const DAY_SOURCE  = 'daylight', DAY_LAYER = 'daylight';
+const MERC_MAX_LAT = 85.05112878;
 const mercY = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+const latOfMercY = y => Math.atan(Math.sinh(y)) * 180 / Math.PI;
+
+const BAND_IMG_W  = 1440;   // 2 px per 0.5° grid column
 const BAND_MERC_TOP = mercY(GRID.maxLat), BAND_MERC_BOT = mercY(GRID.minLat);
 const BAND_IMG_H  = Math.round((BAND_MERC_TOP - BAND_MERC_BOT) / (2 * Math.PI) * BAND_IMG_W);
 
-// Grid row / column for each image row / column (nearest cell, as the old renderer did).
+// Grid row / column for each image row / column (nearest cell).
 const BAND_ROW_GI = new Int32Array(BAND_IMG_H);
 for (let py = 0; py < BAND_IMG_H; py++) {
-    const y = BAND_MERC_TOP - (py + 0.5) / BAND_IMG_H * (BAND_MERC_TOP - BAND_MERC_BOT);
-    const lat = Math.atan(Math.sinh(y)) * 180 / Math.PI;
+    const lat = latOfMercY(BAND_MERC_TOP - (py + 0.5) / BAND_IMG_H * (BAND_MERC_TOP - BAND_MERC_BOT));
     BAND_ROW_GI[py] = Math.min(GRID.rows - 1, Math.max(0, Math.floor((lat - GRID.minLat) / GRID.res)));
 }
 const BAND_COL_GJ = new Int32Array(BAND_IMG_W);
@@ -1112,104 +1237,151 @@ for (let px = 0; px < BAND_IMG_W; px++) {
     BAND_COL_GJ[px] = Math.min(GRID.cols - 1, Math.floor((lon - GRID.minLon) / GRID.res));
 }
 
-// Colours every image pixel from the observations: bright where every band matches (fading
-// with the match error), faint gold where only some do, and a faint daylight wash for a
-// single UTC observation.
+// Bright where every band matches (fading with the match error), faint gold where only some do.
 function paintBandImage(obs) {
     const img = new ImageData(BAND_IMG_W, BAND_IMG_H);
     const d = img.data;
     const n = obs.length;
-    // the day/night wash only makes sense for a single UTC observation
-    const dayGrid = (n === 1 && obs[0].mode !== 'local') ? obs[0].dayGrid : null;
-
     for (let py = 0; py < BAND_IMG_H; py++) {
         const base = BAND_ROW_GI[py] * GRID.cols;
         for (let px = 0; px < BAND_IMG_W; px++) {
             const idx = base + BAND_COL_GJ[px];
-
-            // how many observations' bands cover this cell?
             let matchCount = 0, sumDiff = 0;
             for (let k = 0; k < n; k++) {
                 const dff = obs[k].grid[idx];
                 if (dff < MATCH_TOL) { matchCount++; sumDiff += dff; }
             }
-
             const i4 = (py * BAND_IMG_W + px) * 4;
             if (matchCount === n) {
-                // overlap of every band (a single band when n === 1): bright
                 const t = (sumDiff / n) / MATCH_TOL;
-                d[i4]   = 255;
-                d[i4+1] = (179 * (1 - t)) | 0;
-                d[i4+2] = 0;
-                d[i4+3] = (220 * (1 - t)) | 0;
+                d[i4] = 255; d[i4+1] = (179 * (1 - t)) | 0; d[i4+2] = 0; d[i4+3] = (220 * (1 - t)) | 0;
             } else if (matchCount > 0) {
-                // covered by some but not all bands: faint gold
-                d[i4]   = 255;
-                d[i4+1] = 179;
-                d[i4+2] = 0;
-                d[i4+3] = 38;
-            } else if (dayGrid && dayGrid[idx]) {
-                // faint golden wash over the daylit part of the world
-                d[i4]   = 255;
-                d[i4+1] = 179;
-                d[i4+2] = 0;
-                d[i4+3] = 18;
+                d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = 38;
             }
         }
     }
     return img;
 }
 
-async function renderBands() {
-    refreshClearAllBtn();
-    await mapReady;
-    if (!observations.length) {
-        if (map.getLayer(BAND_LAYER)) map.setLayoutProperty(BAND_LAYER, 'visibility', 'none');
-        return;
+// Daylight wash for one UTC moment, over the whole map (not just the band's 60°S–85°N grid), so
+// polar day and polar night show with the seasons. Sun altitude is sampled every degree and
+// interpolated per pixel; the edge fades across ±0.5° of altitude.
+const DAY_IMG_W = 720, DAY_IMG_H = 720;   // Mercator from +85.05° to −85.05° is square
+let dayImgFor = null;
+function paintDaylightImage(epochMs) {
+    const date = new Date(epochMs);
+    const NLAT = 181, NLON = 361;   // 1° samples, -90..90 × -180..180
+    const alt = new Float32Array(NLAT * NLON);
+    for (let a = 0; a < NLAT; a++) {
+        for (let o = 0; o < NLON; o++) {
+            alt[a * NLON + o] = SunCalc.getPosition(date, a - 90, o - 180).altitude * 180 / Math.PI;
+        }
     }
-    const image = paintBandImage(observations);
-    const src = map.getSource(BAND_SOURCE);
+    const img = new ImageData(DAY_IMG_W, DAY_IMG_H);
+    const d = img.data;
+    const top = Math.PI;   // mercY(MERC_MAX_LAT)
+    for (let py = 0; py < DAY_IMG_H; py++) {
+        const lat = latOfMercY(top - (py + 0.5) / DAY_IMG_H * 2 * top);
+        const fa = lat + 90, a0 = Math.floor(fa), ta = fa - a0;
+        for (let px = 0; px < DAY_IMG_W; px++) {
+            const fo = (px + 0.5) / DAY_IMG_W * 360, o0 = Math.floor(fo), to = fo - o0;
+            const i00 = a0 * NLON + o0;
+            const v = (alt[i00] * (1 - to) + alt[i00 + 1] * to) * (1 - ta) +
+                      (alt[i00 + NLON] * (1 - to) + alt[i00 + NLON + 1] * to) * ta;
+            const k = Math.min(1, Math.max(0, v + 0.5));
+            if (!k) continue;
+            const i4 = (py * DAY_IMG_W + px) * 4;
+            d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = (18 * k) | 0;
+        }
+    }
+    return img;
+}
+
+function setImageLayer(sourceId, layerId, coords, image, beforeId) {
+    const src = map.getSource(sourceId);
     if (src) {
         src.updateImage({ image });
     } else {
-        map.addSource(BAND_SOURCE, {
-            type: 'image',
-            coordinates: [
-                [GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat],
-                [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat],
-            ],
-        });
-        map.getSource(BAND_SOURCE).updateImage({ image });
+        map.addSource(sourceId, { type: 'image', coordinates: coords });
+        map.getSource(sourceId).updateImage({ image });
         map.addLayer({
-            id: BAND_LAYER, type: 'raster', source: BAND_SOURCE,
-            paint: { 'raster-opacity': resultOpacity, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' },
-        });
+            id: layerId, type: 'raster', source: sourceId,
+            paint: { 'raster-opacity': resultOpacity, 'raster-fade-duration': 0, 'raster-resampling': layerId === BAND_LAYER ? 'nearest' : 'linear' },
+        }, beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     }
-    map.setLayoutProperty(BAND_LAYER, 'visibility', 'visible');
+    map.setLayoutProperty(layerId, 'visibility', 'visible');
+}
+const hideLayer = id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); };
+
+async function renderBands() {
+    $('opacity-wrap').style.display = observations.length ? 'flex' : 'none';
+    await mapReady;
+    if (!observations.length) { hideLayer(BAND_LAYER); hideLayer(DAY_LAYER); return; }
+
+    setImageLayer(BAND_SOURCE, BAND_LAYER,
+        [[GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat], [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat]],
+        paintBandImage(observations));
+
+    // The daylight wash only makes sense for a single UTC moment.
+    const one = observations.length === 1 && observations[0].mode !== 'local' ? observations[0] : null;
+    if (!one) { hideLayer(DAY_LAYER); return; }
+    if (dayImgFor !== one.baseEpochMs || !map.getSource(DAY_SOURCE)) {
+        dayImgFor = one.baseEpochMs;
+        setImageLayer(DAY_SOURCE, DAY_LAYER,
+            [[-180, MERC_MAX_LAT], [180, MERC_MAX_LAT], [180, -MERC_MAX_LAT], [-180, -MERC_MAX_LAT]],
+            paintDaylightImage(one.baseEpochMs), BAND_LAYER);
+    } else {
+        map.setLayoutProperty(DAY_LAYER, 'visibility', 'visible');
+    }
 }
 
-// Turns the globe to face a new band: the centre of its matching cells, averaged as 3D unit
+// A short glow on the band, to show it was updated without moving the map.
+let pulseRaf = 0;
+function pulseBand() {
+    if (!map.getLayer(BAND_LAYER)) return;
+    cancelAnimationFrame(pulseRaf);
+    const t0 = performance.now(), dur = 650;
+    const step = now => {
+        const t = Math.min(1, (now - t0) / dur);
+        const k = Math.sin(t * Math.PI);
+        map.setPaintProperty(BAND_LAYER, 'raster-opacity', resultOpacity + (1 - resultOpacity) * k);
+        map.setPaintProperty(BAND_LAYER, 'raster-brightness-min', 0.35 * k);
+        if (t < 1) pulseRaf = requestAnimationFrame(step);
+    };
+    pulseRaf = requestAnimationFrame(step);
+}
+
+// Turns the map to face a new band: the centre of its matching cells, averaged as 3D unit
 // vectors so a band across the antimeridian or around a pole still gets a sensible centre.
-function frameBand(grid) {
+// Each cell is weighted by its area (cos lat): grid cells shrink toward the poles, and an
+// unweighted average would pull a ring's centre poleward.
+function frameBand(grid) { frameCells(idx => grid[idx] < MATCH_TOL); }
+
+// With two or more bands, the overlap is what matters: turn the map to its centre.
+function frameOverlap() {
+    frameCells(idx => observations.every(o => o.grid[idx] < MATCH_TOL));
+}
+
+function frameCells(inside) {
     let x = 0, y = 0, z = 0;
     for (let i = 0; i < GRID.rows; i++) {
         const lat = (GRID.minLat + i * GRID.res) * Math.PI / 180;
         const cl = Math.cos(lat), sl = Math.sin(lat);
         for (let j = 0; j < GRID.cols; j++) {
-            if (!(grid[i * GRID.cols + j] < MATCH_TOL)) continue;
+            if (!inside(i * GRID.cols + j)) continue;
             const lon = (GRID.minLon + j * GRID.res) * Math.PI / 180;
-            x += cl * Math.cos(lon); y += cl * Math.sin(lon); z += sl;
+            x += cl * cl * Math.cos(lon); y += cl * cl * Math.sin(lon); z += cl * sl;
         }
     }
     if (!x && !y && !z) return;
     const lon = Math.atan2(y, x) * 180 / Math.PI;
     const lat = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI;
-    map.flyTo({ center: [lon, lat], zoom: 1.6 });
+    map.flyTo({ center: [lon, lat], zoom: projection === 'globe' ? 1.6 : 1.2, bearing: 0, pitch: 0 });
 }
 
 function formatObsLabel(baseEpochMs, mode) {
     const dt = new Date(baseEpochMs);
-    const p = v => String(v).padStart(2, '0');
+    const p = pad2;
     return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())} ` +
            `${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())} ${mode === 'local' ? 'Local' : 'UTC'}`;
 }
@@ -1229,50 +1401,29 @@ function overlapCount() {
     return c;
 }
 
-function updateObsList() {
-    const wrap = document.getElementById('obs-wrap');
-    const opacityWrap = document.getElementById('opacity-wrap');
-    const list = document.getElementById('obs-list');
-    if (!observations.length) {
-        wrap.style.display = 'none';
-        opacityWrap.style.display = 'none';
-        document.getElementById('obs-menu').style.display = 'none';
-        list.innerHTML = '';
-        return;
-    }
-    wrap.style.display = 'flex';
-    opacityWrap.style.display = 'flex';
-    document.getElementById('obs-count').textContent = observations.length;
-    list.innerHTML = observations.map((o, i) =>
-        `<div class="obs-row">` +
-            `<div class="obs-info">` +
-                `<span class="obs-time">${o.label}</span>` +
-                `<span class="obs-meas">H ${+o.h.toFixed(1)} · L ${+o.s.toFixed(1)}</span>` +
-            `</div>` +
-            `<button class="obs-remove" data-i="${i}" title="Remove this observation">×</button>` +
-        `</div>`
-    ).join('');
-    list.querySelectorAll('.obs-remove').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const i = +btn.dataset.i;
-            // Removing the current (last) band means the measurement no longer maps to a
-            // band, so the next calculation should start a fresh one.
-            if (editingCurrent && i === observations.length - 1) editingCurrent = false;
-            observations.splice(i, 1);
-            renderBands();
-            updateObsList();
-            refreshNewObsBtn();   // dropping back under the cap can re-enable "New observation"
-        });
-    });
-}
+// ---- OPACITY ----
 
-document.getElementById('btn-observations').addEventListener('click', e => {
-    e.stopPropagation();
-    const menu = document.getElementById('obs-menu');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+function paintOpacitySlider() {
+    const s = $('opacity-slider');
+    const pct = (s.value - s.min) / (s.max - s.min) * 100;
+    s.style.background = `linear-gradient(to right, #ffb300 0%, #ffb300 ${pct}%, #5a5a5a ${pct}%, #5a5a5a 100%)`;
+}
+paintOpacitySlider();
+
+$('opacity-slider').addEventListener('input', e => {
+    resultOpacity = parseFloat(e.target.value);
+    [BAND_LAYER, DAY_LAYER].forEach(l => { if (map.getLayer(l)) map.setPaintProperty(l, 'raster-opacity', resultOpacity); });
+    paintOpacitySlider();
 });
-document.addEventListener('click', e => {
-    if (!document.getElementById('obs-wrap').contains(e.target)) {
-        document.getElementById('obs-menu').style.display = 'none';
-    }
+
+// ---- HELP ----
+
+$('btn-help').addEventListener('click', () => {
+    const card = $('help-card');
+    card.style.display = card.style.display === 'none' ? 'block' : 'none';
 });
+$('btn-help-close').addEventListener('click', () => { $('help-card').style.display = 'none'; });
+
+// ---- START ----
+
+loadTabIntoUI();

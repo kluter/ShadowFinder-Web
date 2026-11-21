@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <!-- Everything runs from this site; the only third-party hosts are the map tile servers.
-         'unsafe-inline' styles are for style="" attributes, not scripts. -->
+         'unsafe-inline' styles are for style="" attributes, not scripts. blob: is the dropped photo. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org; connect-src 'self' https://server.arcgisonline.com https://tile.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="author" content="Pawel Kluter">
@@ -20,83 +20,92 @@
 <body>
     <div id="app">
 
-        <!-- LEFT: IMAGE -->
+        <!-- LEFT: OBSERVATIONS (photo or typed values) AND ALL INPUT -->
         <div id="image-panel">
             <div class="panel-header">
                 <div class="brand">
                     <img src="assets/logo.svg" alt="" class="brand-logo" width="22" height="22">
                     <h1>Shadow<span class="brand-accent">Finder</span></h1>
                 </div>
+                <!-- One tab per observation; "+" adds one (renderTabs in script.js) -->
+                <div class="obs-tabs" id="obs-tabs" role="tablist" aria-label="Observations"></div>
             </div>
 
-            <!-- STEP INDICATOR -->
-            <div id="step-bar">
-                <div id="step-pill">
-                    <div id="step-fill"></div>
-                    <div id="step-content">
-                        <span id="step-instruction">Drop an image to begin</span>
+            <!-- Input bar: when, then how long the shadow is; the menu at the end -->
+            <div id="input-bar">
+                <div class="dt-wrap" id="dt-wrap">
+                    <div class="dt-field" id="dt-field" role="group" aria-label="Capture date and time" title="Capture date and time · type straight through, ↑/↓ change a part, paste works too">
+                        <input class="dt-seg dt-seg-y" data-seg="y" placeholder="yyyy" inputmode="numeric" autocomplete="off" aria-label="Year">
+                        <span class="dt-sep">-</span>
+                        <input class="dt-seg" data-seg="mo" placeholder="mm" inputmode="numeric" autocomplete="off" aria-label="Month">
+                        <span class="dt-sep">-</span>
+                        <input class="dt-seg" data-seg="d" placeholder="dd" inputmode="numeric" autocomplete="off" aria-label="Day">
+                        <span class="dt-gap"></span>
+                        <input class="dt-seg" data-seg="h" placeholder="hh" inputmode="numeric" autocomplete="off" aria-label="Hour">
+                        <span class="dt-sep">:</span>
+                        <input class="dt-seg" data-seg="mi" placeholder="mm" inputmode="numeric" autocomplete="off" aria-label="Minute">
+                        <span class="dt-sep">:</span>
+                        <input class="dt-seg" data-seg="s" placeholder="ss" inputmode="numeric" autocomplete="off" aria-label="Second">
+                        <button type="button" class="dt-cal-btn" id="btn-calendar" title="Pick the day from a calendar" aria-label="Open calendar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+                        </button>
                     </div>
+                    <div class="cal-pop" id="cal-pop" style="display:none" role="dialog" aria-label="Pick a day"></div>
                 </div>
-                <div class="step-actions">
-                    <div id="measure-info" style="display:none">
-                        <span class="measure-label">H</span><span class="measure-val" id="measure-h">—</span>
-                        <span class="measure-sep">·</span>
-                        <span class="measure-label">L</span><span class="measure-val" id="measure-s">—</span>
-                        <span class="measure-anglewrap"><span class="measure-sep">·</span><span id="measure-angle" class="measure-angle" title="Angle between object and shadow">—</span></span>
-                    </div>
-                    <button id="btn-manual" title="Enter height and shadow length as numbers instead of clicking">Manual input</button>
-                    <button id="btn-reset" disabled title="Clear the current points or manual input to measure again (saved bands stay)">Reset measurement</button>
-                    <button id="btn-new-image" disabled title="Clear the current measurement and start a new observation">New observation</button>
+                <div class="exif-wrap" id="exif-wrap">
+                    <button class="exif-burger" id="btn-exif" title="Photo metadata (EXIF): capture time and GPS" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                        <span class="exif-dot" id="exif-dot" hidden></span>
+                    </button>
+                    <div class="exif-card" id="exif-card" style="display:none"></div>
+                </div>
+                <div class="toggle-wrap" id="tz-toggle" role="group" aria-label="Time zone of the capture time">
+                    <button id="btn-utc" class="toggle-btn active-toggle" data-mode="utc" title="The time is in UTC">UTC</button>
+                    <button id="btn-local" class="toggle-btn" data-mode="local" title="The time is the local clock time where the photo was taken">Local</button>
+                </div>
+                <div class="hl-field" id="hl-field" title="Object height and shadow length: measured from the 3 points, or typed. Only the ratio matters, so any unit works.">
+                    <label for="input-h">H</label>
+                    <input id="input-h" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="height">
+                    <label for="input-l">L</label>
+                    <input id="input-l" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="shadow">
+                    <span id="measure-angle" class="measure-angle" hidden></span>
+                </div>
+                <div class="menu-wrap" id="menu-wrap">
+                    <button class="session-burger" id="btn-menu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <rect y="2"  width="16" height="2" rx="1"/>
+                            <rect y="7"  width="16" height="2" rx="1"/>
+                            <rect y="12" width="16" height="2" rx="1"/>
+                        </svg>
+                    </button>
+                    <div class="session-menu" id="app-menu" style="display:none" role="menu"></div>
                 </div>
             </div>
 
             <div id="image-container">
                 <canvas id="image-canvas"></canvas>
-                <div class="exif-wrap" id="exif-wrap" style="display:none">
-                    <button class="exif-burger" id="btn-exif" title="Image metadata">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="16 18 22 12 16 6"/>
-                            <polyline points="8 6 2 12 8 18"/>
-                        </svg>
-                    </button>
-                    <div class="exif-card" id="exif-card" style="display:none"></div>
-                </div>
                 <div id="drop-overlay">
-                    Drop image here
+                    Drop / paste a photo here
                     <button id="btn-browse" type="button">Browse</button>
+                    <span class="drop-or">or type the height and shadow length above</span>
                 </div>
                 <input type="file" id="file-picker" accept="image/*" style="display:none">
+                <div id="step-hint-wrap"><span id="step-hint" class="step-hint"></span></div>
                 <div id="zoom-hint">
                     <span class="hint-pill">scroll to zoom · space+drag to pan</span>
-                </div>
-                <div id="manual-card" style="display:none">
-                    <div class="manual-header">
-                        <span>Manual input</span>
-                        <button class="manual-close" id="btn-manual-close">×</button>
-                    </div>
-                    <div class="manual-body">
-                        <p class="manual-note">Type the object height and shadow length as numbers. Only the ratio matters, so any unit works.</p>
-                        <div class="manual-row">
-                            <label for="manual-h">Height</label>
-                            <input type="number" id="manual-h" min="0" step="any" placeholder="e.g. 96">
-                        </div>
-                        <div class="manual-row">
-                            <label for="manual-l">Length</label>
-                            <input type="number" id="manual-l" min="0" step="any" placeholder="e.g. 118">
-                        </div>
-                    </div>
-                    <div class="manual-footer">
-                        <button id="btn-manual-ok">OK</button>
-                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- RIGHT: MAP + CONTROLS -->
+        <!-- RIGHT: MAP -->
         <div id="map-panel">
             <div class="panel-header">
                 <div class="basemap-wrap" id="basemap-wrap">
-                    <button type="button" id="btn-basemap" class="basemap-btn" title="Basemap" aria-haspopup="true" aria-expanded="false">
+                    <button type="button" id="btn-basemap" class="basemap-btn" title="Base layer" aria-haspopup="true" aria-expanded="false">
+                        <span class="basemap-caption">Base layer</span>
                         <span id="basemap-name">Dark</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,4.5 6,8 9.5,4.5"/></svg>
                     </button>
@@ -112,31 +121,16 @@
                 </div>
             </div>
 
-            <!-- DATE/TIME INPUT BAR -->
-            <div id="datetime-bar">
-                <button id="btn-clear-map" disabled title="Clear all bands and the current measurement, and start over">Clear all</button>
-                <div class="obs-wrap" id="obs-wrap" style="display:none">
-                    <button id="btn-observations" title="Shadow observations on the map">Observations <span id="obs-count">0</span> ▾</button>
-                    <div id="obs-menu" style="display:none">
-                        <div id="obs-list"></div>
-                    </div>
-                </div>
-                <div class="opacity-control" id="opacity-wrap" title="Result opacity" style="display:none">
-                    <span class="opacity-ico">◐</span>
-                    <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85">
-                </div>
+            <!-- Map bar: how the map is shown -->
+            <div id="map-bar">
                 <div class="toggle-wrap" id="projection-toggle" role="group" aria-label="Map projection">
                     <button id="btn-globe" class="toggle-btn" data-projection="globe" title="Show the map as a globe">Globe</button>
                     <button id="btn-flat" class="toggle-btn" data-projection="mercator" title="Show the map flat (Web Mercator)">2D</button>
                 </div>
-                <div class="dt-spacer"></div>
-                <input type="date" id="input-date" class="dt-input">
-                <input type="time" id="input-time" class="dt-input" step="1">
-                <div class="toggle-wrap">
-                    <button id="btn-utc" class="toggle-btn active-toggle">UTC</button>
-                    <button id="btn-local" class="toggle-btn">Local</button>
+                <div class="opacity-control" id="opacity-wrap" title="Band opacity" style="display:none">
+                    <span class="opacity-ico">◐</span>
+                    <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85" aria-label="Band opacity">
                 </div>
-                <button id="btn-calculate" disabled>Calculate</button>
             </div>
 
             <div id="map-container"></div>
@@ -147,11 +141,11 @@
                     <button class="help-close" id="btn-help-close">×</button>
                 </div>
                 <ol class="help-steps">
-                    <li><b>Add a photo</b> by dropping it on the left panel (or click Browse). If it carries EXIF data, the metadata panel lets you pull its date, time and GPS.</li>
-                    <li><b>Mark 3 points</b> on the image: the <b>base</b> of the object, its <b>top</b>, then the <b>tip</b> of the shadow. No photo? Use <b>Manual input</b> to type the height and shadow length directly.</li>
+                    <li><b>Add a photo</b>: drop it, paste it, or click Browse. If it carries an EXIF capture time, the date and time are filled in for you.</li>
+                    <li><b>Mark 3 points</b> on the photo: the <b>base</b> of the object, its <b>top</b>, then the <b>tip</b> of the shadow. No photo? Type the <b>H</b>eight and shadow <b>L</b>ength instead.</li>
                     <li><b>Enter the date and time</b> the photo was taken, and pick <b>UTC</b> or <b>Local</b>.</li>
-                    <li><b>Calculate</b>. A bright band appears on the map showing every location where that shadow could occur at that moment.</li>
-                    <li><b>Narrow it down</b> (optional): click <b>New observation</b>, load the same place at a different time, and mark its shadow. Each result adds a band, and where they overlap is the location. Two bands give a fix, a third resolves any ambiguity, so the tool caps it at three. Fixed webcams are ideal for this.</li>
+                    <li>The band appears on the map by itself: every place where that shadow could fall at that moment.</li>
+                    <li><b>Narrow it down</b> (optional): click <b>+</b> next to the tab for another observation of the same place at a different time. Where the bands overlap is the location. Two bands give a fix, a third resolves any ambiguity, so the tool caps it at three. Fixed webcams are ideal for this.</li>
                 </ol>
                 <div class="help-warning">
                     <span class="help-warning-icon">⚠</span>
