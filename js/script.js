@@ -79,11 +79,15 @@ let isPanning = false, panStartX = 0, panStartY = 0, panOffsetX = 0, panOffsetY 
 
 // MapLibre GL (bundled in vendor/, exposed by js/maplibre-global.js) on a globe: the band is
 // planet-scale, and a globe shows its true shape where flat Web Mercator stretches it.
+// Globe or flat (Web Mercator), switched in the map bar and remembered.
+const PROJECTIONS = ['globe', 'mercator'];
+let projection = PROJECTIONS.includes(localStorage.getItem('sf-projection')) ? localStorage.getItem('sf-projection') : 'globe';
+
 const map = new maplibregl.Map({
     container: 'map-container',
     style: {
         version: 8,
-        projection: { type: 'globe' },
+        projection: { type: projection },
         sources: {},
         layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#111' } }],
     },
@@ -91,7 +95,21 @@ const map = new maplibregl.Map({
     zoom: 1.6,
     attributionControl: { compact: true },
 });
-map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-left');
+// Compass only (zoom is scroll / pinch). With visualizePitch, clicking it resets both
+// bearing and tilt, and the needle shows the tilt.
+map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'bottom-left');
+
+function setProjection(type) {
+    projection = PROJECTIONS.includes(type) ? type : 'globe';
+    map.setProjection({ type: projection });
+    localStorage.setItem('sf-projection', projection);
+    document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
+        b.classList.toggle('active-toggle', b.dataset.projection === projection));
+}
+document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
+    b.addEventListener('click', () => setProjection(b.dataset.projection)));
+document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
+    b.classList.toggle('active-toggle', b.dataset.projection === projection));
 
 // Resolves once the style is ready for sources and layers to be added.
 const mapReady = new Promise(resolve => map.once('load', resolve));
@@ -122,10 +140,15 @@ const TILE_SETS = [
 
 let activeBaseIds = [];
 async function setTileSet(id) {
+    const set = TILE_SETS.find(s => s.id === id) || TILE_SETS[0];
+    localStorage.setItem('sf-tileset', set.id);
+    document.getElementById('basemap-name').textContent = set.label;
+    document.querySelectorAll('#basemap-menu .layer-item').forEach(i =>
+        i.classList.toggle('active', i.dataset.id === set.id));
+
     await mapReady;
     activeBaseIds.forEach(lid => { map.removeLayer(lid); map.removeSource(lid); });
     activeBaseIds = [];
-    const set = TILE_SETS.find(s => s.id === id) || TILE_SETS[0];
     // Basemap layers go under the band layer when it exists.
     const beforeId = map.getLayer(BAND_LAYER) ? BAND_LAYER : undefined;
     set.layers.forEach((l, i) => {
@@ -134,49 +157,30 @@ async function setTileSet(id) {
         map.addLayer({ id: lid, type: 'raster', source: lid, paint: { 'raster-opacity': l.opacity ?? 1 } }, beforeId);
         activeBaseIds.push(lid);
     });
-    localStorage.setItem('sf-tileset', id);
 }
-setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 
-class LayerSwitcher {
-    onAdd(m) {
-        const wrap = document.createElement('div');
-        wrap.className = 'maplibregl-ctrl layer-switcher-wrap';
-        const btn = document.createElement('button');
-        btn.className = 'layer-burger';
-        btn.title = 'Switch map layer';
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <rect y="2"  width="16" height="2" rx="1"/>
-            <rect y="7"  width="16" height="2" rx="1"/>
-            <rect y="12" width="16" height="2" rx="1"/>
-        </svg>`;
-        const menu = document.createElement('div');
-        menu.className = 'layer-menu';
-        menu.style.display = 'none';
-        TILE_SETS.forEach(set => {
-            const item = document.createElement('div');
-            item.className = 'layer-item';
-            item.textContent = set.label;
-            item.dataset.id = set.id;
-            item.onclick = () => {
-                setTileSet(set.id);
-                menu.querySelectorAll('.layer-item').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                menu.style.display = 'none';
-            };
-            menu.appendChild(item);
-        });
-        const savedId = localStorage.getItem('sf-tileset') || 'dark';
-        menu.querySelector(`[data-id="${savedId}"]`)?.classList.add('active');
-        btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
-        m.on('click', () => { menu.style.display = 'none'; });
-        wrap.append(btn, menu);
-        this._wrap = wrap;
-        return wrap;
-    }
-    onRemove() { this._wrap.remove(); }
-}
-map.addControl(new LayerSwitcher(), 'top-right');
+// Basemap dropdown: the map panel's title is the selector (as in TracePoint).
+(() => {
+    const btn  = document.getElementById('btn-basemap');
+    const menu = document.getElementById('basemap-menu');
+    const open = show => {
+        menu.style.display = show ? 'block' : 'none';
+        btn.setAttribute('aria-expanded', String(show));
+    };
+    TILE_SETS.forEach(set => {
+        const item = document.createElement('div');
+        item.className = 'layer-item';
+        item.textContent = set.label;
+        item.dataset.id = set.id;
+        item.onclick = () => { setTileSet(set.id); open(false); };
+        menu.appendChild(item);
+    });
+    btn.addEventListener('click', e => { e.stopPropagation(); open(menu.style.display === 'none'); });
+    document.addEventListener('click', e => { if (!document.getElementById('basemap-wrap').contains(e.target)) open(false); });
+    map.on('mousedown', () => open(false));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') open(false); });
+})();
+setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 
 let resultOpacity = 0.85;
 let observations = [];   // each: { id, label, baseEpochMs, mode, h, s, grid, dayGrid }
