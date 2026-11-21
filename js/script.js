@@ -194,6 +194,7 @@ async function setTileSet(id) {
         i.classList.toggle('active', i.dataset.id === set.id));
 
     await mapReady;
+    applyPalette(set.id);   // the bands' colours follow the base map
     activeBaseIds.forEach(lid => { map.removeLayer(lid); map.removeSource(lid); });
     activeBaseIds = [];
     // Basemap layers go under the daylight, band and overlap layers when they exist.
@@ -246,6 +247,7 @@ function newTab() {
         imageFile: null,    // the photo as a file (session export with photos, autosave)
         pendingImage: '',   // restored session: the file name of the photo it waits for
         opacity: null,      // band opacity set in the Layers dropdown (null = default)
+        gpsMarker: null,    // the photo's EXIF GPS position on the map, when shown
         bandImgFor: null,   // the result its map layer was painted for
         fileName: '',
         exif: null,
@@ -267,7 +269,6 @@ function newTab() {
 let tabs = [newTab()];
 let active = tabs[0];
 let observations = [];
-let exifGpsMarker = null;
 // Bands on the map: 'all' (their overlap is the location) or 'one' (only the selected shadow's)
 let showMode = 'all';
 
@@ -325,11 +326,11 @@ function addTab() {
 function removeTab(t) {
     clearTimeout(t.timer);
     t.token++;   // drop any calculation still running for it
+    removeExifGps(t);   // its GPS pin goes with it
     if (tabs.length === 1) {
         // closing the last shadow is the clear-all: start fresh
         tabs = [newTab()];
         active = tabs[0];
-        if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
     } else {
         const i = tabs.indexOf(t);
         tabs.splice(i, 1);
@@ -407,6 +408,7 @@ function loadImage(file, tab = active, onReady = null, { restore = !!tab.pending
             tab.fileName = file.name || '';
             tab.pendingImage = '';
             if (!restore) {
+                removeExifGps(tab);   // a new photo: the old photo's GPS pin goes
                 tab.points.length = 0;
                 tab.view = null;
                 tab.adjust = { ...ADJUST_DEFAULT };
@@ -1149,7 +1151,8 @@ function syncExifChip() {
     chip.classList.toggle('edited', edited);
     chip.textContent = edited ? 'edited ↺' : 'EXIF';
     chip.title = edited ? "You changed the photo's EXIF time. Click to restore it."
-               : gps   ? "Time from the photo's EXIF. Click to show where it was taken (GPS) on the map."
+               : gps   ? (t.gpsMarker ? "Time from the photo's EXIF. Click to remove its GPS pin from the map."
+                                      : "Time from the photo's EXIF. Click to show where it was taken (GPS) on the map.")
                :         "Time from the photo's EXIF.";
 }
 
@@ -1186,7 +1189,7 @@ function renderExifCard() {
             <line x1="1" y1="8" x2="4.5" y2="8"/>
             <line x1="11.5" y1="8" x2="15" y2="8"/>
         </svg>`;
-        const gpsBtn = gps ? `<button class="exif-gps-btn" id="btn-exif-gps">${crosshair}Show on map</button>` : '';
+        const gpsBtn = gps ? `<button class="exif-gps-btn" id="btn-exif-gps">${crosshair}${active.gpsMarker ? 'Remove from map' : 'Show on map'}</button>` : '';
 
         card.innerHTML =
             '<div class="exif-card-header">Photo metadata (EXIF)</div>' +
@@ -1194,7 +1197,7 @@ function renderExifCard() {
             gpsBtn;
 
         card.querySelector('#btn-exif-gps')?.addEventListener('click', () => {
-            goToExifGps(gps.lat, gps.lng);
+            toggleExifGps(active);
             card.style.display = 'none';
         });
         card.querySelectorAll('.exif-copy-btn').forEach(btn => {
@@ -1205,29 +1208,51 @@ function renderExifCard() {
     }
 }
 
-function goToExifGps(lat, lng) {
-    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
+// The photo's GPS position as a pin on the map, one per shadow (as in TracePoint): "Show on map"
+// puts it there, and with the pin there the same control reads "Remove from map". The pin goes
+// with its shadow: closing the tab, a new photo in it, an imported or cleared session.
+function toggleExifGps(t) {
+    if (t.gpsMarker) { removeExifGps(t); return; }
+    const gps = exifGps(t.exif);
+    if (!gps) return;
+    const { lat, lng } = gps;
     const el = document.createElement('div');
     el.className = 'exif-gps-marker';
     const exifCoords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
     const popup = new maplibregl.Popup({ className: 'tp-popup tp-popup-exif', offset: 14, maxWidth: 'none' })
         .setHTML(
-            `<div class="tp-popup-header">EXIF GPS Position</div>` +
+            `<div class="tp-popup-header">Shadow ${tabIndex(t)} · EXIF GPS position</div>` +
             `<div class="tp-popup-body">` +
             `<span>${exifCoords}</span>` +
             `<button class="tp-copy-btn" data-action="copy-coords" data-coords="${exifCoords}" title="Copy coordinates">` +
             `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">` +
             `<rect x="5" y="5" width="9" height="9" rx="1"/><path d="M2 11V2h9"/>` +
             `</svg></button>` +
-            `</div>`
+            `</div>` +
+            `<button class="tp-popup-link" data-action="remove-gps" data-tab="${t.id}">Remove from map</button>`
         );
-    exifGpsMarker = new maplibregl.Marker({ element: el })
+    t.gpsMarker = new maplibregl.Marker({ element: el })
         .setLngLat([lng, lat])
         .setPopup(popup)
         .addTo(map);
     map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 10) });
-    map.once('moveend', () => { if (exifGpsMarker && !popup.isOpen()) exifGpsMarker.togglePopup(); });
+    map.once('moveend', () => { if (t.gpsMarker && !popup.isOpen()) t.gpsMarker.togglePopup(); });
+    if (t === active) syncExifChip();
 }
+
+function removeExifGps(t) {
+    if (!t.gpsMarker) return;
+    t.gpsMarker.remove();
+    t.gpsMarker = null;
+    if (t === active) syncExifChip();
+}
+
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="remove-gps"]');
+    if (!btn) return;
+    const t = tabs.find(t => String(t.id) === btn.dataset.tab);
+    if (t) removeExifGps(t);
+});
 
 // Delegated copy handler for popup coordinate buttons
 document.addEventListener('click', e => {
@@ -1243,8 +1268,7 @@ $('btn-exif').addEventListener('click', e => {
         if (applyExifDateTime(t)) onInputChanged(t);
         return;
     }
-    const gps = exifGps(t.exif);
-    if (gps) { $('exif-card').style.display = 'none'; goToExifGps(gps.lat, gps.lng); }
+    if (exifGps(t.exif)) { $('exif-card').style.display = 'none'; toggleExifGps(t); }
 });
 (() => {
     const wrap = $('exif-wrap'), card = $('exif-card');
@@ -1574,9 +1598,53 @@ const bandLayerId = t => `band-${t.id}`;
 // once the overlap is shown, the single bands step back to 25% so the overlap stands out.
 const layerOpacity = { overlap: null, daylight: null };
 const overlapShown = () => showMode === 'all' && observations.length >= 2;
-const bandOpacity    = t => t.opacity ?? (overlapShown() ? 0.25 : 0.85);
+// (a single band next to the overlap needs more opacity on a light map or imagery than on the dark map)
+const bandOpacity    = t => t.opacity ?? (overlapShown() ? palette.besideOverlap : 0.85);
 const overlapOpacity = () => layerOpacity.overlap ?? 0.85;
 const dayOpacity     = () => layerOpacity.daylight ?? 0.85;
+
+// ---- Colours per base map ----
+// Amber reads well on the dark map but sinks into a light map or into desert imagery, and a
+// faint golden "day" wash vanishes on a near-white map. So each base map has its own palette:
+// the band's colour from an exact match (t = 0) to the 20% edge (t = 1), and a day/night shade,
+// either brightening the daylit side (dark map) or darkening the night side (light and imagery).
+const mixRgb = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const PALETTES = {
+    'dark':     { band: t => [255, 179 * (1 - t), 0, 220 * (1 - t)],                          besideOverlap: 0.25, shade: { day: true,  rgb: [255, 179, 0], a: 21 } },
+    'osm':      { band: t => [...mixRgb([214, 58, 0], [150, 0, 70], t), 230 * (1 - t)],       besideOverlap: 0.4,  shade: { day: false, rgb: [20, 30, 70],  a: 50 } },
+    'esri-sat': { band: t => [...mixRgb([255, 40, 220], [120, 70, 255], t), 230 * (1 - t)],   besideOverlap: 0.45, shade: { day: false, rgb: [0, 4, 28],    a: 95 } },
+};
+let paletteId = '', palette = null, bandLut = null;
+function setPalette(id) {
+    paletteId = PALETTES[id] ? id : 'dark';
+    palette = PALETTES[paletteId];
+    bandLut = new Uint8ClampedArray(256 * 4);   // the band colour for 256 steps of t
+    for (let k = 0; k < 256; k++) bandLut.set(palette.band(k / 255).map(Math.round), k * 4);
+}
+setPalette(localStorage.getItem('sf-tileset') || 'dark');
+const shadeName = () => palette.shade.day ? 'Daylight' : 'Night';
+
+// One band pixel at match error fraction t (0 exact … 1 the tolerance edge).
+function putBand(d, o, t) {
+    const q = ((t <= 0 ? 0 : t >= 1 ? 1 : t) * 255 | 0) * 4;
+    d[o] = bandLut[q]; d[o+1] = bandLut[q+1]; d[o+2] = bandLut[q+2]; d[o+3] = bandLut[q+3];
+}
+// One day/night pixel, k = how far the sun is up (0 night … 1 day, soft across the terminator).
+function putShade(d, o, k) {
+    const s = palette.shade, w = s.day ? k : 1 - k;
+    if (w <= 0) return;
+    d[o] = s.rgb[0]; d[o+1] = s.rgb[1]; d[o+2] = s.rgb[2]; d[o+3] = (s.a * w) | 0;
+}
+
+// A new base map brings its colours: every band, the overlap and the shade are repainted.
+function applyPalette(id) {
+    if (id === paletteId) return;
+    setPalette(id);
+    tabs.forEach(t => { t.bandImgFor = null; });
+    overlapImgFor = '';
+    dayImgFor = null;
+    renderBands();
+}
 
 // One band: bright where the shadow matches exactly, fading toward the 20% tolerance edge.
 function paintBandImage(grids) {
@@ -1595,9 +1663,7 @@ function paintBandImage(grids) {
                 sum += dff;
             }
             if (!all) continue;
-            const t = (sum / n) / MATCH_TOL;
-            const i4 = (py * BAND_IMG_W + px) * 4;
-            d[i4] = 255; d[i4+1] = (179 * (1 - t)) | 0; d[i4+2] = 0; d[i4+3] = (220 * (1 - t)) | 0;
+            putBand(d, (py * BAND_IMG_W + px) * 4, (sum / n) / MATCH_TOL);
         }
     }
     return img;
@@ -1628,10 +1694,7 @@ function paintDaylightImage(epochMs) {
             const i00 = a0 * NLON + o0;
             const v = (alt[i00] * (1 - to) + alt[i00 + 1] * to) * (1 - ta) +
                       (alt[i00 + NLON] * (1 - to) + alt[i00 + NLON + 1] * to) * ta;
-            const k = Math.min(1, Math.max(0, v + 0.5));
-            if (!k) continue;
-            const i4 = (py * DAY_IMG_W + px) * 4;
-            d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = (21 * k) | 0;
+            putShade(d, (py * DAY_IMG_W + px) * 4, Math.min(1, Math.max(0, v + 0.5)));
         }
     }
     return img;
@@ -1764,10 +1827,10 @@ function renderLayersCard() {
             overlapShown() ? 'Where every band matches. Double-click to reset' : 'Shown in Overlap mode');
     }
     const day = dayObservation();
-    row('Daylight', dayOpacity(), !!day,
+    row(shadeName(), dayOpacity(), !!day,
         v => { layerOpacity.daylight = v; setOpacity(DAY_LAYER, v); },
         () => { layerOpacity.daylight = null; renderBands(); },
-        day ? 'Where the sun was up at that moment. Double-click to reset' : 'Shown for a UTC time');
+        day ? `${palette.shade.day ? 'Where the sun was up' : 'Where the sun was down'} at that moment. Double-click to reset` : 'Shown for a UTC time');
     const foot = document.createElement('div');
     foot.className = 'adjust-foot';
     foot.innerHTML = '<span>Double-click a slider to reset it</span><button type="button">Reset all</button>';
@@ -2193,8 +2256,7 @@ function paintEquirect(grids) {
                 sum += v;
             }
             if (!all) continue;
-            const t = (sum / n) / MATCH_TOL, o = (py * EQ_W + px) * 4;
-            d[o] = 255; d[o+1] = (179 * (1 - t)) | 0; d[o+2] = 0; d[o+3] = (220 * (1 - t)) | 0;
+            putBand(d, (py * EQ_W + px) * 4, (sum / n) / MATCH_TOL);
         }
     }
     return img;
@@ -2207,10 +2269,7 @@ function paintDaylightEquirect(ms) {
         const lat = 90 - (py + 0.5) * 0.5;
         for (let px = 0; px < W; px++) {
             const alt = SunCalc.getPosition(date, lat, -180 + (px + 0.5) * 0.5).altitude * 180 / Math.PI;
-            const k = Math.min(1, Math.max(0, alt + 0.5));
-            if (!k) continue;
-            const o = (py * W + px) * 4;
-            d[o] = 255; d[o+1] = 179; d[o+2] = 0; d[o+3] = (21 * k) | 0;
+            putShade(d, (py * W + px) * 4, Math.min(1, Math.max(0, alt + 0.5)));
         }
     }
     return img;
@@ -2314,7 +2373,7 @@ async function exportKmz() {
     if (day) {
         const png = new Uint8Array(await (await imageDataToPng(paintDaylightEquirect(day.baseEpochMs))).arrayBuffer());
         files.push({ name: 'files/daylight.png', data: png });
-        overlays.push(`<GroundOverlay><name>Daylight · ${escHtml(day.label)}</name><visibility>1</visibility>` +
+        overlays.push(`<GroundOverlay><name>${shadeName()} · ${escHtml(day.label)}</name><visibility>1</visibility>` +
             `<color>${kmlAlpha(dayOpacity())}</color><drawOrder>-1</drawOrder><Icon><href>files/daylight.png</href></Icon>${box(90, -90)}</GroundOverlay>`);
     }
     const kml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -2545,7 +2604,7 @@ function tabFromData(sd) {
 
 // Replaces the shadows with those of a session. images[i]: a File for shadow i, or null.
 function applySession(list, images = [], activeIndex = 0) {
-    tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
+    tabs.forEach(t => { clearTimeout(t.timer); t.token++; removeExifGps(t); });
     tabs = list.slice(0, MAX_OBS).map(tabFromData);
     if (!tabs.length) tabs = [newTab()];
     active = tabs[Number.isInteger(activeIndex) && tabs[activeIndex] ? activeIndex : 0];
@@ -2719,10 +2778,9 @@ function clearSaved() {
     if (!autosaveOwner) return showToast('ShadowFinder is open in another tab: clear the saved session there.');
     if (!confirm('Delete the saved session and start empty? This cannot be undone.')) return;
     autosaveClearStore().then(() => {
-        tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
+        tabs.forEach(t => { clearTimeout(t.timer); t.token++; removeExifGps(t); });
         tabs = [newTab()];
         active = tabs[0];
-        if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
         syncObservations(); renderBands(); loadTabIntoUI();
         showToast('Saved session cleared.', 'success');
     });
