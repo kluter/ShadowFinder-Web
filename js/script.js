@@ -11,7 +11,7 @@ const overlay   = $('drop-overlay');
 // ---- TOAST ----
 
 const toastCounts = new Map();
-const TOAST_DURATION = 7000;
+const TOAST_DURATION = 4500;
 const TOAST_MAX_STACK = 3;
 
 function showToast(msg, type = 'error') {
@@ -1818,6 +1818,7 @@ function syncMapBarButtons() {
               : r.mode === 'utc' ? 'Centre the map on the ring: where the sun stood straight overhead'
               : 'Only for UTC times: a Local band is not a single ring';
     $('btn-layers').disabled = !observations.length;
+    $('btn-export').disabled = !observations.length;
 }
 
 $('btn-center').addEventListener('click', () => {
@@ -2053,42 +2054,378 @@ document.addEventListener('click', e => {
     input.addEventListener('blur', () => { input.classList.remove('search-input-error'); input.placeholder = PLACEHOLDER; });
 })();
 
-// ---- MAP RIGHT-CLICK: the clicked coordinates, to copy ----
+// ---- MAP RIGHT-CLICK: copy the coordinates, open the spot in other maps or in TracePoint ----
+// After TracePoint's map menu. MapLibre fires 'contextmenu' only for a right-click without a drag
+// (right-drag rotates). The links are plain hrefs: nothing is requested until one is clicked.
+
+// The other services count zoom in 256 px tiles, MapLibre in 512 px: one level apart.
+const CTX_LINKS = [
+    ['Google Maps',   (la, ln, z) => `https://www.google.com/maps/search/?api=1&query=${la},${ln}`],
+    ['Street View',   (la, ln, z) => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${la},${ln}`],
+    ['Google Earth',  (la, ln, z) => `https://earth.google.com/web/@${la},${ln},0a,2000d,35y,0h,0t,0r`],
+    ['OpenStreetMap', (la, ln, z) => `https://www.openstreetmap.org/?mlat=${la}&mlon=${ln}#map=${z}/${la}/${ln}`],
+];
+const CTX_MORE_LINKS = [
+    ['Apple Maps',  (la, ln, z) => `https://maps.apple.com/?ll=${la},${ln}&q=${la},${ln}&z=${z}`],
+    ['Lookmap',     (la, ln, z) => `https://lookmap.skzk.dev/#c=${z - 1}/${la}/${ln}`],
+    ['Bing Maps',   (la, ln, z) => `https://www.bing.com/maps?cp=${la}~${ln}&lvl=${z}&sp=point.${la}_${ln}_Pin`],
+    ['Mapillary',   (la, ln, z) => `https://www.mapillary.com/app/?lat=${la}&lng=${ln}&z=${z - 1}`],
+    ['Yandex Maps', (la, ln, z) => `https://yandex.com/maps/?ll=${ln},${la}&z=${z}&pt=${ln},${la}`],
+];
+// TracePoint, the sibling tool, opens a view from its URL hash (#lat,lng,zoom in MapLibre zoom).
+// A shadow band narrows a search to a region; TracePoint pins the camera down inside it.
+const TRACEPOINT_URL = 'https://kluter.github.io/TracePoint/';
+const tracepointLink = (la, ln) => `${TRACEPOINT_URL}#${la},${ln},${Math.max(14, Math.round(map.getZoom())).toFixed(2)}`;
 
 const ctxMenu = document.createElement('div');
 ctxMenu.className = 'map-ctx-menu';
 ctxMenu.style.display = 'none';
 $('map-container').appendChild(ctxMenu);
-const hideCtxMenu = () => { ctxMenu.style.display = 'none'; };
+// The submenu is an element of its own next to the menu (the menu clips what it contains)
+const ctxSub = document.createElement('div');
+ctxSub.className = 'map-ctx-menu map-ctx-sub';
+ctxSub.style.display = 'none';
+$('map-container').appendChild(ctxSub);
+let ctxSubTimer = 0;
+
+function hideCtxSub()  { clearTimeout(ctxSubTimer); ctxSub.style.display = 'none'; }
+function hideCtxMenu() { ctxMenu.style.display = 'none'; hideCtxSub(); }
+// Right of the menu, level with its "Open in…" row; left of it where the map ends
+function showCtxSub(trigger) {
+    clearTimeout(ctxSubTimer);
+    const box = map.getContainer().getBoundingClientRect();
+    const m = ctxMenu.getBoundingClientRect(), t = trigger.getBoundingClientRect();
+    ctxSub.style.display = 'block';
+    const w = ctxSub.offsetWidth, h = ctxSub.offsetHeight;
+    const left = m.right - box.left + w > box.width ? m.left - box.left - w + 1 : m.right - box.left - 1;
+    ctxSub.style.left = `${Math.max(0, left)}px`;
+    ctxSub.style.top  = `${Math.max(0, Math.min(t.top - box.top, box.height - h))}px`;
+}
+// Leaving towards the submenu must not close it on the way
+function leaveCtxSub() { clearTimeout(ctxSubTimer); ctxSubTimer = setTimeout(hideCtxSub, 250); }
+ctxSub.addEventListener('mouseenter', () => clearTimeout(ctxSubTimer));
+ctxSub.addEventListener('mouseleave', leaveCtxSub);
 
 map.on('contextmenu', e => {
     e.preventDefault();
-    const c = `${e.lngLat.lat.toFixed(6)}, ${e.lngLat.lng.toFixed(6)}`;
+    const la = e.lngLat.lat.toFixed(6);
+    const ln = e.lngLat.lng.toFixed(6);
+    const z  = Math.round(map.getZoom()) + 1;
+    const add = (parent, tag, cls, text) => {
+        const n = document.createElement(tag);
+        n.className = cls;
+        if (text) n.textContent = text;
+        parent.appendChild(n);
+        return n;
+    };
+    const link = (parent, text, href) => {
+        const a = add(parent, 'a', 'map-ctx-item', text);
+        a.href = href; a.target = '_blank'; a.rel = 'noopener';
+        a.addEventListener('click', hideCtxMenu);
+        return a;
+    };
+
     ctxMenu.innerHTML = '';
-    const head = document.createElement('div');
-    head.className = 'map-ctx-head';
-    head.textContent = c;
-    const copy = document.createElement('button');
+    add(ctxMenu, 'div', 'map-ctx-head', `${la}, ${ln}`);
+    const copy = add(ctxMenu, 'button', 'map-ctx-item', 'Copy coordinates');
     copy.type = 'button';
-    copy.className = 'map-ctx-item';
-    copy.textContent = 'Copy coordinates';
-    copy.onclick = () => {
+    copy.addEventListener('click', () => {
         hideCtxMenu();
-        navigator.clipboard.writeText(c)
+        navigator.clipboard.writeText(`${la}, ${ln}`)
             .then(() => showToast('Coordinates copied.', 'success'))
             .catch(() => showToast('Could not copy to clipboard.'));
-    };
-    ctxMenu.append(head, copy);
-    ctxMenu.style.display = 'block';
+    });
+    const tp = link(ctxMenu, 'Open in TracePoint', tracepointLink(la, ln));
+    tp.classList.add('map-ctx-tracepoint');
+    tp.title = 'Pin the camera position down with lines of sight, in the companion tool';
+    tp.addEventListener('mouseenter', leaveCtxSub);
+
+    add(ctxMenu, 'div', 'map-ctx-divider');
+    CTX_LINKS.forEach(([label, url]) => link(ctxMenu, `Open in ${label}`, url(la, ln, z)).addEventListener('mouseenter', leaveCtxSub));
+
+    const more = add(ctxMenu, 'button', 'map-ctx-item map-ctx-more', 'Open in…');
+    more.type = 'button';
+    more.setAttribute('aria-haspopup', 'true');
+    more.addEventListener('mouseenter', () => showCtxSub(more));
+    more.addEventListener('mouseleave', leaveCtxSub);
+    more.addEventListener('click', () => { if (ctxSub.style.display === 'none') showCtxSub(more); else hideCtxSub(); });
+    hideCtxSub();
+    ctxSub.innerHTML = '';
+    CTX_MORE_LINKS.forEach(([label, url]) => link(ctxSub, label, url(la, ln, z)));
+
+    // at the click, flipped so it stays inside the map
     const box = map.getContainer().getBoundingClientRect();
+    ctxMenu.style.display = 'block';
     const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
-    ctxMenu.style.left = `${Math.min(e.point.x, box.width - w - 4)}px`;
-    ctxMenu.style.top  = `${Math.min(e.point.y, box.height - h - 4)}px`;
+    const x = e.point.x + w > box.width  ? e.point.x - w : e.point.x;
+    const y = e.point.y + h > box.height ? e.point.y - h : e.point.y;
+    ctxMenu.style.left = `${Math.max(0, x)}px`;
+    ctxMenu.style.top  = `${Math.max(0, y)}px`;
 });
 map.on('movestart', hideCtxMenu);
 map.on('click', hideCtxMenu);
-document.addEventListener('mousedown', e => { if (!ctxMenu.contains(e.target)) hideCtxMenu(); });
+document.addEventListener('mousedown', e => { if (!ctxMenu.contains(e.target) && !ctxSub.contains(e.target)) hideCtxMenu(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCtxMenu(); });
+
+// ---- EXPORT: the bands for Google Earth (KMZ) and GIS (GeoTIFF, GeoJSON) ----
+// KMZ and GeoTIFF carry the bands as they look, painted straight from the 0.5° grid in plain
+// latitude / longitude (equirectangular, what both formats expect); GeoJSON carries their outlines
+// (contours.js). All three are written here, no library: a KMZ is a zip of doc.kml and PNGs, the
+// GeoTIFF an uncompressed RGBA TIFF with the GeoTIFF tags for EPSG:4326.
+
+const EQ_SCALE = 2;                                  // image pixels per grid cell
+const EQ_W = GRID.cols * EQ_SCALE, EQ_H = GRID.rows * EQ_SCALE;
+const EQ_NORTH = GRID.minLat + GRID.rows * GRID.res; // 85
+const EQ_SOUTH = GRID.minLat;                        // -60
+
+// A band (one grid) or the overlap (several), north up, in the map's colours.
+function paintEquirect(grids) {
+    const img = new ImageData(EQ_W, EQ_H);
+    const d = img.data, n = grids.length;
+    for (let py = 0; py < EQ_H; py++) {
+        const i = GRID.rows - 1 - Math.floor(py / EQ_SCALE);
+        for (let px = 0; px < EQ_W; px++) {
+            const idx = i * GRID.cols + Math.floor(px / EQ_SCALE);
+            let sum = 0, all = true;
+            for (let k = 0; k < n; k++) {
+                const v = grids[k][idx];
+                if (!(v < MATCH_TOL)) { all = false; break; }
+                sum += v;
+            }
+            if (!all) continue;
+            const t = (sum / n) / MATCH_TOL, o = (py * EQ_W + px) * 4;
+            d[o] = 255; d[o+1] = (179 * (1 - t)) | 0; d[o+2] = 0; d[o+3] = (220 * (1 - t)) | 0;
+        }
+    }
+    return img;
+}
+
+// The daylight of one UTC moment over the whole Earth, 0.5° per pixel.
+function paintDaylightEquirect(ms) {
+    const W = 720, H = 360, img = new ImageData(W, H), d = img.data, date = new Date(ms);
+    for (let py = 0; py < H; py++) {
+        const lat = 90 - (py + 0.5) * 0.5;
+        for (let px = 0; px < W; px++) {
+            const alt = SunCalc.getPosition(date, lat, -180 + (px + 0.5) * 0.5).altitude * 180 / Math.PI;
+            const k = Math.min(1, Math.max(0, alt + 0.5));
+            if (!k) continue;
+            const o = (py * W + px) * 4;
+            d[o] = 255; d[o+1] = 179; d[o+2] = 0; d[o+3] = (21 * k) | 0;
+        }
+    }
+    return img;
+}
+
+// Layers over each other with their opacities ("over" compositing), as the map shows them.
+function composite(layers) {
+    const out = new ImageData(EQ_W, EQ_H), o = out.data;
+    for (const { img, opacity } of layers) {
+        const s = img.data;
+        for (let p = 0; p < s.length; p += 4) {
+            const a = s[p+3] / 255 * opacity;
+            if (!a) continue;
+            const b = o[p+3] / 255, outA = a + b * (1 - a);
+            for (let c = 0; c < 3; c++) o[p+c] = Math.round((s[p+c] * a + o[p+c] * b * (1 - a)) / outA);
+            o[p+3] = Math.round(outA * 255);
+        }
+    }
+    return out;
+}
+
+// The layers to export, as on the map: each shadow's band, the overlap (Overlap mode, 2+ bands)
+// and the daylight of the selected shadow (UTC only).
+function exportLayers() {
+    const list = [];
+    tabs.forEach(t => {
+        if (!t.result) return;
+        list.push({ key: `shadow-${tabIndex(t)}`, name: `Shadow ${tabIndex(t)} · ${t.result.label}`,
+            grids: [t.result.grid], opacity: bandOpacity(t), visible: showMode === 'all' || t === active });
+    });
+    if (observations.length >= 2) {
+        list.push({ key: 'overlap', name: 'Overlap of all bands', grids: observations.map(o => o.grid),
+            opacity: overlapOpacity(), visible: overlapShown() });
+    }
+    return list;
+}
+
+const imageDataToPng = img => new Promise((resolve, reject) => {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').putImageData(img, 0, 0);
+    c.toBlob(b => b ? resolve(b) : reject(new Error('PNG')), 'image/png');
+});
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// ---- ZIP (stored, no compression: PNGs are compressed already) ----
+const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+})();
+function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(files) {   // files: [{ name, data: Uint8Array }]
+    const enc = new TextEncoder(), parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+        const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+        const h = new DataView(new ArrayBuffer(30));
+        h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);   // UTF-8 names
+        h.setUint16(8, 0, true); h.setUint32(14, crc, true); h.setUint32(18, size, true); h.setUint32(22, size, true);
+        h.setUint16(26, name.length, true);
+        parts.push(new Uint8Array(h.buffer), name, f.data);
+        const c = new DataView(new ArrayBuffer(46));
+        c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+        c.setUint32(16, crc, true); c.setUint32(20, size, true); c.setUint32(24, size, true);
+        c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+        central.push(new Uint8Array(c.buffer), name);
+        offset += 30 + name.length + size;
+    }
+    const cdSize = central.reduce((s, p) => s + p.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/vnd.google-earth.kmz' });
+}
+
+// ---- KMZ: one image overlay per band, the overlap and the daylight, each with its opacity ----
+async function exportKmz() {
+    const layers = exportLayers();
+    if (!layers.length) return showToast('No band to export yet.');
+    const files = [], overlays = [];
+    const kmlAlpha = v => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0') + 'ffffff';
+    const box = (n, s) => `<LatLonBox><north>${n}</north><south>${s}</south><east>180</east><west>-180</west></LatLonBox>`;
+    for (const l of layers) {
+        const png = new Uint8Array(await (await imageDataToPng(paintEquirect(l.grids))).arrayBuffer());
+        files.push({ name: `files/${l.key}.png`, data: png });
+        overlays.push(`<GroundOverlay><name>${escHtml(l.name)}</name><visibility>${l.visible ? 1 : 0}</visibility>` +
+            `<color>${kmlAlpha(l.opacity)}</color><Icon><href>files/${l.key}.png</href></Icon>${box(EQ_NORTH, EQ_SOUTH)}</GroundOverlay>`);
+    }
+    const day = dayObservation();
+    if (day) {
+        const png = new Uint8Array(await (await imageDataToPng(paintDaylightEquirect(day.baseEpochMs))).arrayBuffer());
+        files.push({ name: 'files/daylight.png', data: png });
+        overlays.push(`<GroundOverlay><name>Daylight · ${escHtml(day.label)}</name><visibility>1</visibility>` +
+            `<color>${kmlAlpha(dayOpacity())}</color><drawOrder>-1</drawOrder><Icon><href>files/daylight.png</href></Icon>${box(90, -90)}</GroundOverlay>`);
+    }
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<name>ShadowFinder Web · shadow bands</name>
+<description>Where each shadow could fall at its capture time (sun-elevation match within ${Math.round(MATCH_TOL * 100)}%), 0.5° grid, 60°S to 85°N. Made with ShadowFinder Web, a browser port of Bellingcat's ShadowFinder.</description>
+${overlays.join('\n')}
+</Document></kml>`;
+    files.unshift({ name: 'doc.kml', data: new TextEncoder().encode(kml) });
+    downloadBlob(makeZip(files), `shadowfinder_bands_${exportStamp()}.kmz`);
+    showToast('KMZ exported: open it in Google Earth.', 'success');
+}
+
+// ---- GeoTIFF: the bands as shown, composited, RGBA, EPSG:4326 ----
+function makeGeoTiff(img, west, north, resDeg) {
+    const W = img.width, H = img.height, pixels = img.data;
+    // tag, type (3 SHORT, 4 LONG, 12 DOUBLE), values
+    const entries = [
+        [256, 4, [W]], [257, 4, [H]], [258, 3, [8, 8, 8, 8]], [259, 3, [1]], [262, 3, [2]],
+        [273, 4, [0]],                     // StripOffsets, filled in below
+        [277, 3, [4]], [278, 4, [H]], [279, 4, [pixels.length]], [284, 3, [1]],
+        [338, 3, [2]],                     // ExtraSamples: unassociated alpha
+        [339, 3, [1, 1, 1, 1]],
+        [33550, 12, [resDeg, resDeg, 0]],                    // ModelPixelScale
+        [33922, 12, [0, 0, 0, west, north, 0]],              // ModelTiepoint: pixel (0,0) → (west, north)
+        [34735, 3, [1, 1, 0, 4,  1024, 0, 1, 2,  1025, 0, 1, 1,  2048, 0, 1, 4326,  2054, 0, 1, 9102]],   // GeoKeys: geographic, PixelIsArea, WGS 84, degrees
+    ];
+    const size = { 3: 2, 4: 4, 12: 8 };
+    const ifdStart = 8, ifdSize = 2 + entries.length * 12 + 4;
+    let extra = ifdStart + ifdSize;
+    const extraOffsets = entries.map(([, type, vals]) => {
+        const bytes = size[type] * vals.length;
+        if (bytes <= 4) return null;
+        const at = extra; extra += bytes + (bytes % 2);
+        return at;
+    });
+    const dataStart = extra;
+    entries.find(e => e[0] === 273)[2][0] = dataStart;
+    const buf = new ArrayBuffer(dataStart + pixels.length), dv = new DataView(buf);
+    dv.setUint16(0, 0x4949, true); dv.setUint16(2, 42, true); dv.setUint32(4, ifdStart, true);
+    dv.setUint16(ifdStart, entries.length, true);
+    const write = (at, type, vals) => vals.forEach((v, k) => {
+        if (type === 3) dv.setUint16(at + k * 2, v, true);
+        else if (type === 4) dv.setUint32(at + k * 4, v, true);
+        else dv.setFloat64(at + k * 8, v, true);
+    });
+    entries.forEach(([tag, type, vals], i) => {
+        const e = ifdStart + 2 + i * 12;
+        dv.setUint16(e, tag, true); dv.setUint16(e + 2, type, true); dv.setUint32(e + 4, vals.length, true);
+        if (extraOffsets[i] == null) write(e + 8, type, vals);
+        else { dv.setUint32(e + 8, extraOffsets[i], true); write(extraOffsets[i], type, vals); }
+    });
+    dv.setUint32(ifdStart + 2 + entries.length * 12, 0, true);   // no next IFD
+    new Uint8Array(buf, dataStart).set(pixels);
+    return new Blob([buf], { type: 'image/tiff' });
+}
+
+function exportGeoTiff() {
+    const layers = exportLayers().filter(l => l.visible);
+    if (!layers.length) return showToast('No band to export yet.');
+    const img = composite(layers.map(l => ({ img: paintEquirect(l.grids), opacity: l.opacity })));
+    downloadBlob(makeGeoTiff(img, -180, EQ_NORTH, GRID.res / EQ_SCALE), `shadowfinder_bands_${exportStamp()}.tif`);
+    showToast('GeoTIFF exported: the bands as shown, WGS 84 (EPSG:4326).', 'success');
+}
+
+// ---- GeoJSON: the outlines of each band and of the overlap ----
+function exportGeoJson() {
+    if (!observations.length) return showToast('No band to export yet.');
+    const fc = bandsFeatureCollection(observations);
+    fc.features.forEach(f => {
+        const t = tabs.find(t => t.result && t.result.label === f.properties.label && f.properties.kind === 'observation');
+        if (t) f.properties.shadow = `Shadow ${tabIndex(t)}`;
+    });
+    const blob = new Blob([JSON.stringify(fc)], { type: 'application/geo+json' });
+    downloadBlob(blob, `shadowfinder_bands_${exportStamp()}.geojson`);
+    showToast('GeoJSON exported: band outlines, WGS 84.', 'success');
+}
+
+function renderExportCard() {
+    const card = $('export-card');
+    card.innerHTML = '<div class="panel-title">Export the bands</div>';
+    const entry = (label, ext, hint, run) => {
+        const it = document.createElement('div');
+        it.className = 'session-item export-item';
+        it.innerHTML = `<span class="export-icon"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="1" x2="5" y2="8"/><polyline points="2,5.5 5,8.5 8,5.5"/></svg></span>` +
+            `<span class="export-text"><b>${label}</b> <i>${ext}</i><small>${hint}</small></span>`;
+        it.addEventListener('click', () => {
+            card.style.display = 'none';
+            setTimeout(() => run().catch?.(() => showToast('Export failed.')), 20);
+        });
+        card.appendChild(it);
+    };
+    entry('Google Earth', '.kmz', 'Each band, the overlap and the daylight as image overlays, as on the map', exportKmz);
+    entry('GeoTIFF', '.tif', 'The bands as shown, one image for QGIS and other GIS', async () => exportGeoTiff());
+    entry('GeoJSON', '.geojson', 'Outlines of each band and of the overlap', async () => exportGeoJson());
+    const note = document.createElement('div');
+    note.className = 'export-note';
+    note.textContent = 'Covers 60°S to 85°N at 0.5°, the area the bands are calculated for. Opacity as set in Layers.';
+    card.appendChild(note);
+}
+
+$('btn-export').addEventListener('click', e => {
+    e.stopPropagation();
+    const card = $('export-card');
+    const open = card.style.display === 'none';
+    if (open) renderExportCard();
+    card.style.display = open ? 'block' : 'none';
+    $('btn-export').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', e => { if (!$('export-wrap').contains(e.target)) $('export-card').style.display = 'none'; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('export-card').style.display = 'none'; });
 
 // ---- SESSION: import / export (photos optional) and autosave (as in TracePoint) ----
 //
@@ -2440,7 +2777,7 @@ function renderSessionMenu() {
     row.querySelector('button').addEventListener('click', () => { close(); clearSaved(); });
 
     section('Demo');
-    entry('Teal box, Germany, April 2024', 'Load the demo photo; mark the teal box and its shadow', true, loadDemo);
+    entry('Patriot, Germany', 'Load the demo photo; mark the teal box and its shadow', true, loadDemo);
 }
 
 function openSessionMenu(show) {

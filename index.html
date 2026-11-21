@@ -176,6 +176,13 @@
                         </button>
                         <div class="layers-card" id="layers-card" style="display:none"></div>
                     </div>
+                    <!-- Export the bands for Google Earth / GIS (renderExportCard in script.js) -->
+                    <div class="layers-wrap" id="export-wrap">
+                        <button type="button" class="icon-btn" id="btn-export" title="Export the bands for Google Earth or GIS" aria-label="Export the bands" aria-haspopup="true" aria-expanded="false" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v3h16v-3"/></svg>
+                        </button>
+                        <div class="layers-card export-card" id="export-card" style="display:none"></div>
+                    </div>
                 </div>
             </div>
 

@@ -129,6 +129,7 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     flex-shrink: 0; position: relative; z-index: 6;
 }
 #map-bar { flex-wrap: nowrap; gap: 6px; }
+#input-bar { padding-left: 10px; padding-right: 10px; }
 /* the input bar's right end: photo tools and the session menu */
 .bar-end { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .photo-tools { display: flex; align-items: center; gap: 4px; padding-right: 4px; border-right: 1px solid #2a2a2a; }
@@ -209,32 +210,29 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .cal-day.today { border-color: #444; }
 .cal-day.selected, .cal-day.selected:hover:not(:disabled) { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 
-/* ---- HEIGHT / SHADOW LENGTH: typed, or measured from the three points (read-only, coloured by angle) ---- */
-.hl-group { display: flex; align-items: center; gap: 4px; }
+/* ---- HEIGHT / SHADOW LENGTH: typed, or measured from the three points (read-only) ----
+   Same box, text and states as the When field; the angle quality shows as a border tint
+   and in the colour of the ∠ value, not as a filled box. */
+.hl-group { display: flex; align-items: center; gap: 4px; margin-left: 10px; }
 .hl-field {
-    display: flex; align-items: center; gap: 4px; padding: 0 7px;
-    transition: border-color 0.15s, background 0.15s;
+    display: flex; align-items: center; gap: 4px; padding: 0 6px;
+    font-variant-numeric: tabular-nums; transition: border-color 0.15s;
 }
 .hl-field:focus-within { border-color: var(--accent); }
-.hl-field label { font-size: var(--label-text); font-weight: 700; color: #888; letter-spacing: 0.4px; }
+.hl-field label { font-size: var(--label-text); font-weight: 600; color: #777; letter-spacing: 0.3px; }
 .hl-input {
     width: 42px; height: 22px; padding: 0 2px;
-    background: none; border: none; outline: none;
-    font-size: var(--ctl-text); color: #eee; font-variant-numeric: tabular-nums;
+    background: none; border: none; outline: none; border-radius: 2px;
+    font-size: var(--ctl-text); color: #eee; font-variant-numeric: tabular-nums; caret-color: var(--accent);
 }
 .hl-input::placeholder { color: #555; }
-.hl-input:focus { background: #222; border-radius: 2px; }
+.hl-input:focus { background: #3a2a00; color: #fff; }
 .hl-input[readonly] { cursor: default; }
 .hl-input[readonly]:focus { background: none; }
-.hl-field.q-good { background: #0d2e1a; border-color: #4caf7d; }
-.hl-field.q-good label { color: #4caf7d; }
-.hl-field.q-good .hl-input { color: #a0dbb8; }
-.hl-field.q-warn { background: var(--accent-bg); border-color: var(--accent); }
-.hl-field.q-warn label { color: var(--accent); }
-.hl-field.q-warn .hl-input { color: #ffd04d; }
-.hl-field.q-bad { background: #3d0808; border-color: #ff5d5d; }
-.hl-field.q-bad label { color: #ff5d5d; }
-.hl-field.q-bad .hl-input { color: #ff9999; }
+.hl-field.measured, .dt-field.complete { border-color: #4a4030; }
+.hl-field.q-good { border-color: #2f6a4a; }
+.hl-field.q-warn { border-color: var(--accent-dim); }
+.hl-field.q-bad  { border-color: #7a2a2a; }
 /* angle in the H/L field — green when ~perpendicular, warning colours otherwise (click for why) */
 .measure-angle { font-size: var(--ctl-text); font-variant-numeric: tabular-nums; font-weight: 600; cursor: pointer; margin-left: 2px; }
 .measure-angle.zone-good { color: #4caf7d; }
@@ -604,6 +602,26 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     background: none; border: none; border-radius: 0; font-size: var(--ctl-text);
 }
 .map-ctx-item:hover:not(:disabled) { background: #222; color: #fff; }
+a.map-ctx-item { text-decoration: none; }
+.map-ctx-divider { height: 1px; background: #2a2a2a; margin: 2px 0; }
+.map-ctx-more { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.map-ctx-more::after { content: "›"; color: #777; font-size: 14px; line-height: 1; }
+.map-ctx-sub { min-width: 150px; z-index: 1001; }
+/* the companion tool stands out a little */
+.map-ctx-item.map-ctx-tracepoint { color: var(--accent); }
+.map-ctx-item.map-ctx-tracepoint:hover { background: var(--accent-bg); color: #ffd04d; }
+
+/* ---- EXPORT CARD (map bar) ---- */
+.export-card { width: 300px; padding: 4px 0 8px; }
+.export-card .panel-title { padding: 9px 12px 4px; }
+.export-item { align-items: flex-start; white-space: normal; padding: 8px 12px; }
+.export-item .export-icon { margin-top: 1px; }
+.export-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }
+.export-text b { font-weight: 600; color: #ddd; }
+.export-text i { font-style: normal; font-size: 11px; color: var(--accent); }
+.export-text small { flex-basis: 100%; margin-top: 2px; font-size: 11px; color: #777; line-height: 1.35; }
+.export-item:hover .export-text b { color: #fff; }
+.export-note { margin: 4px 12px 0; padding-top: 8px; border-top: 1px solid #222; font-size: 11px; color: #666; line-height: 1.4; }
 
 /* ---- MAPLIBRE CONTROLS (dark, to match the app) ---- */
 .maplibregl-ctrl-group { background: #151515; border: 1px solid var(--ctl-border); box-shadow: 0 2px 6px #0006; }
