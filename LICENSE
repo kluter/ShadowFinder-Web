@@ -77,9 +77,9 @@ SOFTWARE.
 
 -------------------------------------------------------------------------------
 
-This project bundles "js/suncalc.min.js", the SunCalc library
-(https://github.com/mourner/suncalc), which is licensed under the BSD 2-Clause
-License:
+The sun-position code in "js/script.js" (sunAt) follows the formulas of the
+SunCalc library (https://github.com/mourner/suncalc), which is licensed under
+the BSD 2-Clause License:
 
 Copyright (c) 2026, Volodymyr Agafonkin
 All rights reserved.

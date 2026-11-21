@@ -79,7 +79,7 @@ The band is **every place the shadow could fall**, a search space, not a pin.
 
 ## How it works
 
-- Sun positions come from [SunCalc](https://github.com/mourner/suncalc), the JS equivalent of the original's `suncalc` package.
+- Sun positions use the formulas of [SunCalc](https://github.com/mourner/suncalc), the JS equivalent of the original's `suncalc` package, built into `js/script.js` so the sun is worked out once per moment instead of once per grid point.
 - The world is sampled on a `0.5 degree grid` (latitude -60 to 85). Each point's sun altitude gives the expected shadow ratio `height / tan(altitude)`, compared to yours.
 - Points within a **20% band** are drawn, brightest where the match is exact, the same band the original produces.
 - **Local mode** uses Bellingcat's `timezone_grid.json` to convert your local time to UTC at every point before computing the sun.
@@ -155,7 +155,6 @@ A **Content-Security-Policy** in `index.html` enforces this in the browser: scri
 | Library | Loaded from | Touches your data? |
 |---|---|---|
 | [MapLibre GL JS](https://maplibre.org/) 6.19.0 | bundled in `vendor/maplibre-gl/` | No, renders the globe and map tiles only |
-| [SunCalc](https://github.com/mourner/suncalc) | bundled in `js/` | Locally only, no network |
 | [exifr](https://github.com/MikeKovarik/exifr) | bundled in `js/` | Locally only, no network |
 
 Nothing loads from a CDN, so the app works offline apart from the basemap tiles.

@@ -293,11 +293,6 @@ function syncObservations() {
     observations = tabs.filter(t => t.result).map(t => t.result);
 }
 
-// The bands drawn on the map, following the This / All toggle
-function visibleObservations() {
-    return showMode === 'one' ? (active.result ? [active.result] : []) : observations;
-}
-
 function tabIndex(t) { return tabs.indexOf(t) + 1; }
 
 function renderTabs() {
@@ -1113,11 +1108,11 @@ function escHtml(str) {
 
 function formatExifDate(val) {
     if (!val) return null;
-    if (val instanceof Date) return val.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
     if (typeof val === 'string') {
+        // the digits as written, formatted in UTC so this browser's zone cannot shift them
         const m = val.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
-        if (m) return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6])
-            .toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        if (m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]))
+            .toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' });
     }
     return String(val);
 }
@@ -1161,20 +1156,11 @@ function readExifTime(ex) {
     if (!ex) return null;
     const tags = EXIF_TIME_TAGS.find(([k]) => ex[k] != null);
     if (!tags) return null;
-    const raw = ex[tags[0]];
-    let year, month, day, hour, minute, second = 0;
-
-    if (raw instanceof Date) {
-        // Only from an older exifr setup (dates revived): built with local constructors, so
-        // the local getters read back the digits stored in the file.
-        year = raw.getFullYear(); month = raw.getMonth() + 1; day = raw.getDate();
-        hour = raw.getHours(); minute = raw.getMinutes(); second = raw.getSeconds();
-    } else if (typeof raw === 'string') {
-        const m = raw.match(/^(\d{4})[: -](\d{2})[: -](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-        if (!m) return null;
-        year = +m[1]; month = +m[2]; day = +m[3];
-        hour = +m[4]; minute = +m[5]; second = m[6] ? +m[6] : 0;
-    } else return null;
+    // exifr leaves dates as the text written in the file (reviveValues off), and so does a session
+    const m = String(ex[tags[0]]).match(/^(\d{4})[: -](\d{2})[: -](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    const year = +m[1], month = +m[2], day = +m[3];
+    const hour = +m[4], minute = +m[5], second = m[6] ? +m[6] : 0;
     // A camera whose clock was never set writes "0000:00:00 00:00:00": no time at all.
     if (year < 1900 || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) ||
         hour > 23 || minute > 59 || second > 59) return null;
@@ -1591,7 +1577,8 @@ function getTzOffsetMinutes(tzName, date) {
 
 // ---- SHADOW MATH ----
 
-// The sun at one moment, by SunCalc's own formulas (so the result is the same), split into the
+// The sun at one moment, by the formulas of SunCalc (github.com/mourner/suncalc, BSD-2-Clause;
+// the JS twin of the original ShadowFinder's suncalc package), split into the
 // part that depends only on the time and the part that depends on the place:
 //   sin(altitude) = sin(lat)·sinDec + cos(lat)·cosDec·cos(theta + lng)
 // theta is the sun's hour angle at longitude 0 (radians); the sun is overhead at lat = dec,
@@ -2606,7 +2593,7 @@ let autosaveReady = false, autosaveOwner = false, autosaveTimer = 0, autosaveWar
 
 const finite = v => typeof v === 'number' && Number.isFinite(v);
 
-// Only the EXIF fields the app reads, as plain values (a Date becomes its wall-clock digits).
+// Only the EXIF fields the app reads, as plain values (dates are already text).
 const EXIF_KEYS = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime', 'OffsetTimeOriginal', 'OffsetTime',
     'OffsetTimeDigitized', 'Make', 'Model', 'LensModel', 'FocalLength', 'FNumber', 'ExposureTime', 'ISO',
     'ISOSpeedRatings', 'GPSLatitude', 'GPSLatitudeRef', 'GPSLongitude', 'GPSLongitudeRef'];
@@ -2615,9 +2602,7 @@ function exifToData(ex) {
     const o = {};
     for (const k of EXIF_KEYS) {
         const v = ex[k];
-        if (v instanceof Date) {
-            o[k] = `${v.getFullYear()}:${pad2(v.getMonth() + 1)}:${pad2(v.getDate())} ${pad2(v.getHours())}:${pad2(v.getMinutes())}:${pad2(v.getSeconds())}`;
-        } else if (typeof v === 'string' || finite(v)) o[k] = v;
+        if (typeof v === 'string' || finite(v)) o[k] = v;
         else if (Array.isArray(v) && v.length <= 4 && v.every(finite)) o[k] = [...v];
     }
     return Object.keys(o).length ? o : null;
