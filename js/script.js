@@ -196,8 +196,8 @@ async function setTileSet(id) {
     await mapReady;
     activeBaseIds.forEach(lid => { map.removeLayer(lid); map.removeSource(lid); });
     activeBaseIds = [];
-    // Basemap layers go under the daylight and band layers when they exist.
-    const beforeId = [DAY_LAYER, BAND_LAYER].find(l => map.getLayer(l));
+    // Basemap layers go under the daylight, band and overlap layers when they exist.
+    const beforeId = map.getStyle().layers.map(l => l.id).find(id => id !== 'background' && !id.startsWith('base-'));
     set.layers.forEach((l, i) => {
         const lid = `base-${set.id}-${i}`;
         map.addSource(lid, { type: 'raster', tiles: [l.url], tileSize: 256, maxzoom: l.maxzoom, attribution: l.attribution || '' });
@@ -241,7 +241,12 @@ let tabSeq = 0;
 function newTab() {
     return {
         id: ++tabSeq,
+        uid: (crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2)),
         img: null,          // HTMLImageElement of the photo, if any
+        imageFile: null,    // the photo as a file (session export with photos, autosave)
+        pendingImage: '',   // restored session: the file name of the photo it waits for
+        opacity: null,      // band opacity set in the Layers dropdown (null = default)
+        bandImgFor: null,   // the result its map layer was painted for
         fileName: '',
         exif: null,
         exifDt: null,       // the capture time as EXIF gave it ({ dt, mode }), to tell an edited time
@@ -262,7 +267,6 @@ function newTab() {
 let tabs = [newTab()];
 let active = tabs[0];
 let observations = [];
-let resultOpacity = 0.85;
 let exifGpsMarker = null;
 // Bands on the map: 'all' (their overlap is the location) or 'one' (only the selected shadow's)
 let showMode = 'all';
@@ -308,6 +312,7 @@ function renderTabs() {
     add.disabled = tabs.length >= MAX_OBS;
     add.addEventListener('click', addTab);
     wrap.appendChild(add);
+    scheduleAutosave();
 }
 
 function addTab() {
@@ -340,7 +345,7 @@ function switchTab(t) {
     saveView();
     active = t;
     loadTabIntoUI();
-    if (showMode === 'one') renderBands();
+    renderBands();   // the daylight and the centre button follow the selected shadow
 }
 
 // Shows the active tab on the left: photo, points, typed values, time and zone.
@@ -348,6 +353,7 @@ function loadTabIntoUI() {
     const t = active;
     img = t.img;
     points = t.points;
+    updateDropOverlay();
     if (img) {
         canvas.style.display = 'block';
         overlay.style.display = 'none';
@@ -388,20 +394,26 @@ let spaceHeld = false;
 
 // Loads a photo into a tab (the active one by default). A new photo is a new observation in
 // that tab, so its points and band are dropped; its EXIF capture time is used when there is one.
-// onReady(tab) runs once both the image and its EXIF are read (the demo places its points then).
-function loadImage(file, tab = active, onReady = null) {
+// A photo for a restored session (from a file, the autosave, or dropped where the tab asks for
+// it) keeps the tab's points, time and settings instead.
+// onReady(tab) runs once both the image and its EXIF are read.
+function loadImage(file, tab = active, onReady = null, { restore = !!tab.pendingImage } = {}) {
     const url = URL.createObjectURL(file);
     const image = new Image();
     const imageLoaded = new Promise((resolve, reject) => {
         image.onload = () => {
             tab.img = image;
+            tab.imageFile = file;
             tab.fileName = file.name || '';
-            tab.points.length = 0;
-            tab.view = null;
-            tab.adjust = { ...ADJUST_DEFAULT };
-            tab.result = null; tab.noMatch = false; tab.framed = false;
-            syncObservations();
-            renderBands();
+            tab.pendingImage = '';
+            if (!restore) {
+                tab.points.length = 0;
+                tab.view = null;
+                tab.adjust = { ...ADJUST_DEFAULT };
+                tab.result = null; tab.noMatch = false; tab.framed = false;
+                syncObservations();
+                renderBands();
+            }
             if (tab === active) loadTabIntoUI(); else renderTabs();
             resolve();
         };
@@ -409,13 +421,19 @@ function loadImage(file, tab = active, onReady = null) {
     });
     image.src = url;
 
-    tab.exif = null;
-    tab.exifDt = null;
     const exifRead = exifr.parse(file, { tiff: true, exif: true, gps: true })
         .then(exif => { tab.exif = exif || null; })
         .catch(() => { tab.exif = null; });
+    if (!restore) { tab.exif = null; tab.exifDt = null; }
 
     Promise.all([imageLoaded, exifRead]).then(() => {
+        if (restore) {
+            tab.exifDt = readExifTime(tab.exif);   // the chip again, without touching the kept time
+            if (tab === active) { syncExifChip(); updateGuide(); }
+            if (onReady) onReady(tab);
+            scheduleAutosave();
+            return;
+        }
         if (applyExifDateTime(tab, { quiet: !!onReady })) onInputChanged(tab);
         if (tab === active) {
             syncExifChip(); updateGuide();
@@ -471,6 +489,7 @@ function photoFilter() {
 
 function syncPhotoTools() {
     const a = active.adjust;
+    scheduleAutosave();
     $('photo-tools').hidden = !active.img;
     ['contrast', 'brightness', 'saturation'].forEach(k => {
         $(`adjust-${k}`).value = a[k];
@@ -696,7 +715,6 @@ function loadFiles(files) {
     renderTabs();
 }
 
-$('btn-browse').addEventListener('click', () => $('file-picker').click());
 $('file-picker').addEventListener('change', e => {
     const files = [...e.target.files].filter(f => f.type.startsWith('image/'));
     if (files.length) loadFiles(files);
@@ -1292,8 +1310,26 @@ function loadDemo() {
         })
         .catch(() => showToast('Could not load the demo image.'));
 }
-$('btn-demo-link').addEventListener('click', loadDemo);
 $('btn-demo').addEventListener('click', loadDemo);
+
+// The photo area without a photo: the drop prompt, or, for a restored session, the photo it waits for.
+function updateDropOverlay() {
+    const t = active;
+    overlay.innerHTML = t.pendingImage
+        ? `<span class="drop-restored-title">Session restored</span>` +
+          `<span class="drop-restore">drop <b>${escHtml(t.pendingImage)}</b> to see the photo again</span>` +
+          `<button id="btn-browse" type="button">Browse</button>` +
+          `<span class="drop-note">The points and the time are kept; the band is already on the map.</span>`
+        : `<span class="drop-title">Drop / Paste image here</span>` +
+          `<button id="btn-browse" type="button">Browse</button>` +
+          `<span class="drop-or">or</span>` +
+          `<button id="btn-demo-link" type="button">Try the Demo</button>` +
+          `<span class="drop-note">No photo? Type the height and shadow length above.</span>`;
+}
+overlay.addEventListener('click', e => {
+    if (e.target.id === 'btn-browse') $('file-picker').click();
+    else if (e.target.id === 'btn-demo-link') loadDemo();
+});
 
 // ---- STEP GUIDE ----
 // The steps as icons down the right edge of the photo, the current one lit; the bottom hint
@@ -1370,6 +1406,7 @@ buildGuide();
 // being dragged) does not pulse the band.
 function onInputChanged(t, { delay = 350, quiet = false } = {}) {
     if (t === active) { updateMeasureUI(); updateGuide(); }
+    scheduleAutosave();
     clearTimeout(t.timer);
     if (!getMeasurements(t) || dtEpoch(t) == null) return;
     t.quiet = quiet;
@@ -1405,7 +1442,7 @@ async function calculateTab(t) {
             const oneShown = showMode === 'one' || observations.length === 1;
             if (!t.framed && !oneShown && overlap > 0) frameOverlap();
             else if (!t.framed && oneShown && t.mode === 'utc') frameBand(grid);
-            else if (!quiet) pulseBand();
+            else if (!quiet) pulseBand(t);
             t.framed = true;
             if (overlap === 0 && !quiet) {
                 showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
@@ -1502,8 +1539,7 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
 // Bands and the daylight wash are painted into images pinned to lat/lon boxes, which MapLibre
 // drapes over the globe (or flat map) like any other layer. MapLibre stretches an image evenly
 // in Web Mercator between its corners, so image rows are spaced in Mercator y.
-const BAND_SOURCE = 'bands', BAND_LAYER = 'bands';
-const DAY_SOURCE  = 'daylight', DAY_LAYER = 'daylight';
+const DAY_LAYER = 'daylight';
 const MERC_MAX_LAT = 85.05112878;
 const mercY = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
 const latOfMercY = y => Math.atan(Math.sinh(y)) * 180 / Math.PI;
@@ -1524,27 +1560,44 @@ for (let px = 0; px < BAND_IMG_W; px++) {
     BAND_COL_GJ[px] = Math.min(GRID.cols - 1, Math.floor((lon - GRID.minLon) / GRID.res));
 }
 
-// Bright where every band matches (fading with the match error), faint gold where only some do.
-function paintBandImage(obs) {
+// ---- Layers on the map ----
+// Every shadow's band is a layer of its own, the overlap of all bands (in Overlap mode) one more
+// on top, and the daylight wash of the selected shadow's moment underneath. Each has its own
+// opacity (the Layers dropdown in the map bar); an image is repainted only when its result changes.
+
+const BAND_COORDS = [[GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat], [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat]];
+const DAY_COORDS  = [[-180, MERC_MAX_LAT], [180, MERC_MAX_LAT], [180, -MERC_MAX_LAT], [-180, -MERC_MAX_LAT]];
+const OVERLAP_LAYER = 'overlap';
+const bandLayerId = t => `band-${t.id}`;
+
+// Opacity of each layer: what the user set, or a default (null). A band on its own is at 85%;
+// once the overlap is shown, the single bands step back to 25% so the overlap stands out.
+const layerOpacity = { overlap: null, daylight: null };
+const overlapShown = () => showMode === 'all' && observations.length >= 2;
+const bandOpacity    = t => t.opacity ?? (overlapShown() ? 0.25 : 0.85);
+const overlapOpacity = () => layerOpacity.overlap ?? 0.85;
+const dayOpacity     = () => layerOpacity.daylight ?? 0.85;
+
+// One band: bright where the shadow matches exactly, fading toward the 20% tolerance edge.
+function paintBandImage(grids) {
     const img = new ImageData(BAND_IMG_W, BAND_IMG_H);
     const d = img.data;
-    const n = obs.length;
+    const n = grids.length;
     for (let py = 0; py < BAND_IMG_H; py++) {
         const base = BAND_ROW_GI[py] * GRID.cols;
         for (let px = 0; px < BAND_IMG_W; px++) {
             const idx = base + BAND_COL_GJ[px];
-            let matchCount = 0, sumDiff = 0;
+            // the overlap (n > 1) is where every band matches, graded by their mean error
+            let sum = 0, all = true;
             for (let k = 0; k < n; k++) {
-                const dff = obs[k].grid[idx];
-                if (dff < MATCH_TOL) { matchCount++; sumDiff += dff; }
+                const dff = grids[k][idx];
+                if (!(dff < MATCH_TOL)) { all = false; break; }
+                sum += dff;
             }
+            if (!all) continue;
+            const t = (sum / n) / MATCH_TOL;
             const i4 = (py * BAND_IMG_W + px) * 4;
-            if (matchCount === n) {
-                const t = (sumDiff / n) / MATCH_TOL;
-                d[i4] = 255; d[i4+1] = (179 * (1 - t)) | 0; d[i4+2] = 0; d[i4+3] = (220 * (1 - t)) | 0;
-            } else if (matchCount > 0) {
-                d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = 38;
-            }
+            d[i4] = 255; d[i4+1] = (179 * (1 - t)) | 0; d[i4+2] = 0; d[i4+3] = (220 * (1 - t)) | 0;
         }
     }
     return img;
@@ -1578,68 +1631,201 @@ function paintDaylightImage(epochMs) {
             const k = Math.min(1, Math.max(0, v + 0.5));
             if (!k) continue;
             const i4 = (py * DAY_IMG_W + px) * 4;
-            d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = (18 * k) | 0;
+            d[i4] = 255; d[i4+1] = 179; d[i4+2] = 0; d[i4+3] = (21 * k) | 0;
         }
     }
     return img;
 }
 
-function setImageLayer(sourceId, layerId, coords, image, beforeId) {
-    const src = map.getSource(sourceId);
+// Adds or updates an image layer. New layers go below `beforeId` when that exists.
+function setImageLayer(id, coords, image, beforeId, resampling = 'nearest') {
+    const src = map.getSource(id);
     if (src) {
         src.updateImage({ image });
     } else {
-        map.addSource(sourceId, { type: 'image', coordinates: coords });
-        map.getSource(sourceId).updateImage({ image });
+        map.addSource(id, { type: 'image', coordinates: coords });
+        map.getSource(id).updateImage({ image });
         map.addLayer({
-            id: layerId, type: 'raster', source: sourceId,
-            paint: { 'raster-opacity': resultOpacity, 'raster-fade-duration': 0, 'raster-resampling': layerId === BAND_LAYER ? 'nearest' : 'linear' },
+            id, type: 'raster', source: id,
+            paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': resampling },
         }, beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     }
-    map.setLayoutProperty(layerId, 'visibility', 'visible');
 }
-const hideLayer = id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); };
+const showLayer = (id, on) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); };
+const setOpacity = (id, v) => { if (map.getLayer(id)) map.setPaintProperty(id, 'raster-opacity', v); };
+const removeImageLayer = id => { if (map.getLayer(id)) map.removeLayer(id); if (map.getSource(id)) map.removeSource(id); };
 
+// The lowest of the result layers, for a new layer that has to go underneath them all.
+function firstResultLayer() {
+    return map.getStyle().layers.map(l => l.id).find(id => id.startsWith('band-') || id === OVERLAP_LAYER);
+}
+
+let overlapImgFor = '';
 async function renderBands() {
-    $('opacity-wrap').style.display = observations.length ? 'flex' : 'none';
     $('show-toggle').hidden = observations.length < 2;
     syncShowToggle();
+    syncMapBarButtons();
     await mapReady;
-    const shown = visibleObservations();
-    if (!shown.length) { hideLayer(BAND_LAYER); hideLayer(DAY_LAYER); return; }
 
-    setImageLayer(BAND_SOURCE, BAND_LAYER,
-        [[GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat], [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat]],
-        paintBandImage(shown));
+    // bands of shadows that no longer exist go
+    map.getStyle().layers.map(l => l.id).filter(id => /^band-\d+$/.test(id))
+        .forEach(id => { if (!tabs.some(t => t.result && bandLayerId(t) === id)) removeImageLayer(id); });
 
-    // The daylight wash only makes sense for a single UTC moment.
-    const one = shown.length === 1 && shown[0].mode !== 'local' ? shown[0] : null;
-    if (!one) { hideLayer(DAY_LAYER); return; }
-    if (dayImgFor !== one.baseEpochMs || !map.getSource(DAY_SOURCE)) {
-        dayImgFor = one.baseEpochMs;
-        setImageLayer(DAY_SOURCE, DAY_LAYER,
-            [[-180, MERC_MAX_LAT], [180, MERC_MAX_LAT], [180, -MERC_MAX_LAT], [-180, -MERC_MAX_LAT]],
-            paintDaylightImage(one.baseEpochMs), BAND_LAYER);
-    } else {
-        map.setLayoutProperty(DAY_LAYER, 'visibility', 'visible');
+    // one layer per shadow with a result, below the overlap
+    for (const t of tabs) {
+        if (!t.result) continue;
+        const id = bandLayerId(t);
+        if (t.bandImgFor !== t.result || !map.getLayer(id)) {
+            setImageLayer(id, BAND_COORDS, paintBandImage([t.result.grid]), map.getLayer(OVERLAP_LAYER) ? OVERLAP_LAYER : undefined);
+            t.bandImgFor = t.result;
+        }
+        showLayer(id, showMode === 'all' || t === active);
+        setOpacity(id, bandOpacity(t));
     }
+
+    // the overlap of all bands
+    if (overlapShown()) {
+        const key = observations.map(o => `${o.id}:${o.baseEpochMs}:${o.mode}:${o.h}:${o.s}`).join('|');
+        if (key !== overlapImgFor || !map.getLayer(OVERLAP_LAYER)) {
+            setImageLayer(OVERLAP_LAYER, BAND_COORDS, paintBandImage(observations.map(o => o.grid)));
+            overlapImgFor = key;
+        }
+        showLayer(OVERLAP_LAYER, true);
+        setOpacity(OVERLAP_LAYER, overlapOpacity());
+    } else {
+        showLayer(OVERLAP_LAYER, false);
+    }
+
+    // daylight of the selected shadow's moment (only a UTC time is one moment for the whole Earth)
+    const day = dayObservation();
+    if (day) {
+        if (dayImgFor !== day.baseEpochMs || !map.getLayer(DAY_LAYER)) {
+            setImageLayer(DAY_LAYER, DAY_COORDS, paintDaylightImage(day.baseEpochMs), firstResultLayer(), 'linear');
+            dayImgFor = day.baseEpochMs;
+        }
+        showLayer(DAY_LAYER, true);
+        setOpacity(DAY_LAYER, dayOpacity());
+    } else {
+        showLayer(DAY_LAYER, false);
+    }
+    if ($('layers-card').style.display !== 'none') renderLayersCard();
 }
 
-// A short glow on the band, to show it was updated without moving the map.
+function dayObservation() {
+    const r = active.result || (observations.length === 1 ? observations[0] : null);
+    return r && r.mode === 'utc' ? r : null;
+}
+
+// A short glow on a band (or the overlap), to show it was updated without moving the map.
 let pulseRaf = 0;
-function pulseBand() {
-    if (!map.getLayer(BAND_LAYER)) return;
+function pulseBand(t) {
+    const id = overlapShown() ? OVERLAP_LAYER : bandLayerId(t);
+    if (!map.getLayer(id)) return;
+    const base = id === OVERLAP_LAYER ? overlapOpacity() : bandOpacity(t);
     cancelAnimationFrame(pulseRaf);
     const t0 = performance.now(), dur = 650;
     const step = now => {
-        const t = Math.min(1, (now - t0) / dur);
-        const k = Math.sin(t * Math.PI);
-        map.setPaintProperty(BAND_LAYER, 'raster-opacity', resultOpacity + (1 - resultOpacity) * k);
-        map.setPaintProperty(BAND_LAYER, 'raster-brightness-min', 0.35 * k);
-        if (t < 1) pulseRaf = requestAnimationFrame(step);
+        const k = Math.sin(Math.min(1, (now - t0) / dur) * Math.PI);
+        map.setPaintProperty(id, 'raster-opacity', base + (1 - base) * k);
+        map.setPaintProperty(id, 'raster-brightness-min', 0.35 * k);
+        if (now - t0 < dur) pulseRaf = requestAnimationFrame(step);
+        else { map.setPaintProperty(id, 'raster-opacity', base); map.setPaintProperty(id, 'raster-brightness-min', 0); }
     };
     pulseRaf = requestAnimationFrame(step);
 }
+
+// ---- LAYERS DROPDOWN (map bar): an opacity slider per band, the overlap and the daylight ----
+
+function renderLayersCard() {
+    const card = $('layers-card');
+    card.innerHTML = '<div class="panel-title">Opacity</div>';
+    const row = (label, value, enabled, onInput, onReset, title) => {
+        const r = document.createElement('div');
+        r.className = 'adjust-row' + (enabled ? '' : ' disabled');
+        if (title) r.title = title;
+        const pct = Math.round(value * 100);
+        r.innerHTML = `<label>${label}</label><input type="range" min="0" max="100" step="5" value="${pct}" ${enabled ? '' : 'disabled'}><span class="adjust-val">${pct}%</span>`;
+        const input = r.querySelector('input'), val = r.querySelector('.adjust-val');
+        input.addEventListener('input', () => { val.textContent = input.value + '%'; onInput(input.value / 100); });
+        input.addEventListener('dblclick', () => { onReset(); renderLayersCard(); });
+        card.appendChild(r);
+    };
+    tabs.forEach(t => {
+        if (!t.result) return;
+        row(`Shadow ${tabIndex(t)}`, bandOpacity(t), showMode === 'all' || t === active,
+            v => { t.opacity = v; setOpacity(bandLayerId(t), v); scheduleAutosave(); },
+            () => { t.opacity = null; renderBands(); },
+            showMode === 'all' || t === active ? 'Double-click to reset' : 'Hidden while only the selected shadow is shown');
+    });
+    if (observations.length >= 2) {
+        row('Overlap', overlapOpacity(), overlapShown(),
+            v => { layerOpacity.overlap = v; setOpacity(OVERLAP_LAYER, v); },
+            () => { layerOpacity.overlap = null; renderBands(); },
+            overlapShown() ? 'Where every band matches. Double-click to reset' : 'Shown in Overlap mode');
+    }
+    const day = dayObservation();
+    row('Daylight', dayOpacity(), !!day,
+        v => { layerOpacity.daylight = v; setOpacity(DAY_LAYER, v); },
+        () => { layerOpacity.daylight = null; renderBands(); },
+        day ? 'Where the sun was up at that moment. Double-click to reset' : 'Shown for a UTC time');
+    const foot = document.createElement('div');
+    foot.className = 'adjust-foot';
+    foot.innerHTML = '<span>Double-click a slider to reset it</span><button type="button">Reset all</button>';
+    foot.querySelector('button').addEventListener('click', () => {
+        tabs.forEach(t => { t.opacity = null; });
+        layerOpacity.overlap = layerOpacity.daylight = null;
+        renderBands();
+        scheduleAutosave();
+    });
+    card.appendChild(foot);
+}
+
+$('btn-layers').addEventListener('click', e => {
+    e.stopPropagation();
+    const card = $('layers-card');
+    const open = card.style.display === 'none';
+    if (open) renderLayersCard();
+    card.style.display = open ? 'block' : 'none';
+    $('btn-layers').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', e => { if (!$('layers-wrap').contains(e.target)) $('layers-card').style.display = 'none'; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('layers-card').style.display = 'none'; });
+
+// ---- CENTRE ON THE RING (map bar) ----
+// A UTC band is a ring around the point where the sun stood straight overhead; this turns the map
+// there. A Local band has no single such point (every place has its own clock), so it stays off.
+
+// The subsolar point, from the sun's declination, right ascension and Greenwich sidereal time
+// (low-precision almanac formulas, good to ~0.01°).
+function subsolarPoint(ms) {
+    const R2D = 180 / Math.PI;
+    const d = ms / 86400000 + 2440587.5 - 2451545.0;   // days since J2000.0
+    const g = (357.529 + 0.98560028 * d) / R2D;
+    const q = 280.459 + 0.98564736 * d;
+    const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) / R2D;
+    const e = (23.439 - 0.00000036 * d) / R2D;
+    const ra  = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) * R2D;
+    const dec = Math.asin(Math.sin(e) * Math.sin(L)) * R2D;
+    const gmst = 18.697374558 + 24.06570982441908 * d;   // hours
+    return { lat: dec, lng: ((ra - gmst * 15) % 360 + 540) % 360 - 180 };
+}
+
+function syncMapBarButtons() {
+    const r = active.result;
+    const btn = $('btn-center');
+    btn.disabled = !(r && r.mode === 'utc');
+    btn.title = !r ? 'Centre the map on the ring (once there is a band)'
+              : r.mode === 'utc' ? 'Centre the map on the ring: where the sun stood straight overhead'
+              : 'Only for UTC times: a Local band is not a single ring';
+    $('btn-layers').disabled = !observations.length;
+}
+
+$('btn-center').addEventListener('click', () => {
+    const r = active.result;
+    if (!r || r.mode !== 'utc') return;
+    const s = subsolarPoint(r.baseEpochMs);
+    map.flyTo({ center: [s.lng, s.lat], zoom: frameZoom(), bearing: 0, pitch: 0 });
+});
 
 // Turns the map to face a new band: the centre of its matching cells, averaged as 3D unit
 // vectors so a band across the antimeridian or around a pole still gets a sensible centre.
@@ -1701,6 +1887,7 @@ document.querySelectorAll('#show-toggle .toggle-btn').forEach(b => b.addEventLis
     if (showMode === b.dataset.show) return;
     showMode = b.dataset.show;
     renderBands();
+    scheduleAutosave();
 }));
 
 // ---- COORDINATE PIN (map bar, or Ctrl+V anywhere) ----
@@ -1903,19 +2090,370 @@ map.on('click', hideCtxMenu);
 document.addEventListener('mousedown', e => { if (!ctxMenu.contains(e.target)) hideCtxMenu(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCtxMenu(); });
 
-// ---- OPACITY ----
+// ---- SESSION: import / export (photos optional) and autosave (as in TracePoint) ----
+//
+// A session file holds the shadows' inputs: points or typed height/length, capture time and zone,
+// the photo's file name and the EXIF fields the app shows, photo adjustments and band opacity.
+// Bands are recalculated on import, never stored. With "Include photos" each photo goes into the
+// file unchanged (base64, EXIF and GPS included), so an import does not ask for it.
+// The autosave keeps the same data in this browser (IndexedDB), photos as files next to it.
 
-function paintOpacitySlider() {
-    const s = $('opacity-slider');
-    const pct = (s.value - s.min) / (s.max - s.min) * 100;
-    s.style.background = `linear-gradient(to right, #ffb300 0%, #ffb300 ${pct}%, #5a5a5a ${pct}%, #5a5a5a 100%)`;
+const SESSION_VERSION = 1;
+const AUTOSAVE_KEY = 'sf-autosave', EXPORT_PHOTOS_KEY = 'sf-export-photos';
+let autosaveOn = localStorage.getItem(AUTOSAVE_KEY) !== '0';
+let exportPhotos = localStorage.getItem(EXPORT_PHOTOS_KEY) === '1';
+let autosaveReady = false, autosaveOwner = false, autosaveTimer = 0, autosaveWarned = false;
+
+const finite = v => typeof v === 'number' && Number.isFinite(v);
+
+// Only the EXIF fields the app reads, as plain values (a Date becomes its wall-clock digits).
+const EXIF_KEYS = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime', 'OffsetTimeOriginal', 'OffsetTime',
+    'OffsetTimeDigitized', 'Make', 'Model', 'LensModel', 'FocalLength', 'FNumber', 'ExposureTime', 'ISO',
+    'ISOSpeedRatings', 'GPSLatitude', 'GPSLatitudeRef', 'GPSLongitude', 'GPSLongitudeRef'];
+function exifToData(ex) {
+    if (!ex) return null;
+    const o = {};
+    for (const k of EXIF_KEYS) {
+        const v = ex[k];
+        if (v instanceof Date) {
+            o[k] = `${v.getFullYear()}:${pad2(v.getMonth() + 1)}:${pad2(v.getDate())} ${pad2(v.getHours())}:${pad2(v.getMinutes())}:${pad2(v.getSeconds())}`;
+        } else if (typeof v === 'string' || finite(v)) o[k] = v;
+        else if (Array.isArray(v) && v.length <= 4 && v.every(finite)) o[k] = [...v];
+    }
+    return Object.keys(o).length ? o : null;
 }
-paintOpacitySlider();
+function exifFromData(o) {
+    if (!o || typeof o !== 'object') return null;
+    const ex = {};
+    for (const k of EXIF_KEYS) {
+        const v = o[k];
+        if ((typeof v === 'string' && v.length < 200) || finite(v)) ex[k] = v;
+        else if (Array.isArray(v) && v.length <= 4 && v.every(finite)) ex[k] = [...v];
+    }
+    return Object.keys(ex).length ? ex : null;
+}
 
-$('opacity-slider').addEventListener('input', e => {
-    resultOpacity = parseFloat(e.target.value);
-    [BAND_LAYER, DAY_LAYER].forEach(l => { if (map.getLayer(l)) map.setPaintProperty(l, 'raster-opacity', resultOpacity); });
-    paintOpacitySlider();
+function tabToData(t) {
+    return {
+        name: `Shadow ${tabIndex(t)}`,
+        imageFilename: t.fileName || t.pendingImage || null,
+        points: t.points.map(p => ({ x: +p.x.toFixed(2), y: +p.y.toFixed(2) })),
+        height: t.h, length: t.l,
+        time: { ...t.dt }, mode: t.mode,
+        exif: exifToData(t.exif),
+        adjust: { ...t.adjust },
+        opacity: t.opacity,
+    };
+}
+
+const blobToDataURL = blob => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+});
+
+async function tabToExport(t) {
+    const data = tabToData(t);
+    if (exportPhotos && t.imageFile) {
+        data.image = { name: t.fileName || 'photo', type: t.imageFile.type || 'image/jpeg', dataUrl: await blobToDataURL(t.imageFile) };
+    }
+    return data;
+}
+
+// The photo inside a session file, as a File; null when it is not a base64 image.
+const IMAGE_DATA_URL = /^data:(image\/[a-z0-9.+-]+);base64,/i;
+function embeddedImageFile(image) {
+    if (!image || typeof image.dataUrl !== 'string') return null;
+    const head = IMAGE_DATA_URL.exec(image.dataUrl.slice(0, 80));
+    if (!head) return null;
+    try {
+        const bin = atob(image.dataUrl.slice(head[0].length));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const name = typeof image.name === 'string' && image.name ? image.name.slice(0, 255) : 'photo';
+        return new File([bytes], name, { type: head[1].toLowerCase() });
+    } catch { return null; }
+}
+
+// A tab from session data; every field is checked, anything odd is dropped.
+function tabFromData(sd) {
+    const t = newTab();
+    if (Array.isArray(sd.points)) {
+        t.points = sd.points.filter(p => p && finite(p.x) && finite(p.y)).slice(0, 3).map(p => ({ x: p.x, y: p.y }));
+    }
+    const num = v => (typeof v === 'string' && /^[\d.,]{0,20}$/.test(v)) ? v : finite(v) ? String(v) : '';
+    t.h = num(sd.height); t.l = num(sd.length);
+    if (sd.time && typeof sd.time === 'object') {
+        SEGS.forEach(s => {
+            const v = sd.time[s];
+            if (typeof v === 'string' && new RegExp(`^\\d{0,${SEG_LEN[s]}}$`).test(v)) t.dt[s] = v;
+        });
+    }
+    t.mode = sd.mode === 'local' ? 'local' : 'utc';
+    t.exif = exifFromData(sd.exif);
+    t.exifDt = readExifTime(t.exif);
+    if (sd.adjust && typeof sd.adjust === 'object') {
+        ['contrast', 'brightness', 'saturation'].forEach(k => {
+            if (finite(sd.adjust[k])) t.adjust[k] = Math.min(200, Math.max(0, Math.round(sd.adjust[k])));
+        });
+        t.adjust.invert = sd.adjust.invert === true;
+    }
+    if (finite(sd.opacity)) t.opacity = Math.min(1, Math.max(0, sd.opacity));
+    const name = typeof sd.imageFilename === 'string' && sd.imageFilename ? sd.imageFilename.slice(0, 255) : '';
+    t.pendingImage = name;
+    t.fileName = '';
+    return t;
+}
+
+// Replaces the shadows with those of a session. images[i]: a File for shadow i, or null.
+function applySession(list, images = [], activeIndex = 0) {
+    tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
+    tabs = list.slice(0, MAX_OBS).map(tabFromData);
+    if (!tabs.length) tabs = [newTab()];
+    active = tabs[Number.isInteger(activeIndex) && tabs[activeIndex] ? activeIndex : 0];
+    syncObservations();
+    loadTabIntoUI();
+    renderBands();
+    tabs.forEach((t, i) => {
+        t.framed = t !== active;   // only the selected shadow turns the map
+        if (images[i]) loadImage(images[i], t, null, { restore: true });
+        onInputChanged(t, { delay: 0, quiet: true });
+    });
+}
+
+const hasWork = () => tabs.some(t => t.img || t.pendingImage || t.points.length || t.h || t.l || SEGS.some(s => t.dt[s]));
+
+function downloadJSON(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const exportStamp = () => new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-');
+
+async function exportShadows(list, filename, doneText) {
+    if (!list.length) return showToast('Nothing to export yet.');
+    let data;
+    try {
+        data = [];
+        for (const t of list) data.push(await tabToExport(t));
+        downloadJSON({ json_version: SESSION_VERSION, app: 'ShadowFinder Web', exported: new Date().toISOString(), show: showMode, shadows: data }, filename);
+    } catch {
+        return showToast(exportPhotos ? 'Export failed: the photos are too large for one file. Switch off "Include photos".' : 'Export failed.');
+    }
+    showToast(doneText + (exportPhotos && list.some(t => t.imageFile) ? ' Photos included.' : ''), 'success');
+}
+const tabHasWork = t => t.img || t.pendingImage || t.points.length || t.h || t.l || SEGS.some(s => t.dt[s]);
+const exportThis = () => exportShadows([active], `shadowfinder_shadow-${tabIndex(active)}_${exportStamp()}.json`, 'Shadow exported.');
+const exportAll  = () => exportShadows(tabs.filter(tabHasWork), `shadowfinder_${exportStamp()}.json`, 'Session exported.');
+
+function importSession(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        let data;
+        try { data = JSON.parse(e.target.result); } catch { return showToast('That is not a ShadowFinder session file.'); }
+        const list = Array.isArray(data?.shadows) ? data.shadows.filter(sd => sd && typeof sd === 'object') : [];
+        if (!list.length) return showToast('No shadows found in that file.');
+        if (hasWork() && !confirm('Replace the current shadows with the ones in this file?')) return;
+        if (data.show === 'one' || data.show === 'all') showMode = data.show;
+        applySession(list, list.map(sd => embeddedImageFile(sd.image)));
+        const n = Math.min(list.length, MAX_OBS);
+        showToast(`${n} shadow${n > 1 ? 's' : ''} imported.` + (list.length > MAX_OBS ? ` Only the first ${MAX_OBS} were kept.` : ''), 'success');
+        scheduleAutosave();
+    };
+    reader.readAsText(file);
+}
+$('json-picker').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) importSession(f);
+    e.target.value = '';
+});
+
+// ---- autosave (IndexedDB "shadowfinder": key "session" = the JSON, "img:<uid>" = each photo) ----
+// Only one browser tab writes (the one holding the Web Lock), so two open tabs can't overwrite
+// each other's photos.
+
+let autosaveDb = null;
+function openAutosaveDb() {
+    if (!autosaveDb) autosaveDb = new Promise((resolve, reject) => {
+        const req = indexedDB.open('shadowfinder', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('autosave');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    return autosaveDb;
+}
+function autosaveTx(mode, fn) {
+    return openAutosaveDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction('autosave', mode);
+        const req = fn(tx.objectStore('autosave'));
+        tx.oncomplete = () => resolve(req?.result);
+        tx.onerror = tx.onabort = () => reject(tx.error);
+    }));
+}
+function autosaveFailed() {
+    if (autosaveWarned) return;
+    autosaveWarned = true;
+    showToast('Autosave failed: browser storage is full or blocked.');
+}
+
+function claimAutosave() {
+    if (!navigator.locks) { autosaveOwner = true; return Promise.resolve(); }
+    const hold = () => new Promise(() => {});
+    return new Promise(resolve => {
+        navigator.locks.request('shadowfinder-autosave', { ifAvailable: true }, lock => {
+            if (!lock) { resolve(); return; }
+            autosaveOwner = true; resolve();
+            return hold();
+        }).catch(() => { autosaveOwner = true; resolve(); });
+    }).then(() => {
+        if (autosaveOwner) return;
+        // another tab writes; take over once it is closed
+        navigator.locks.request('shadowfinder-autosave', () => {
+            autosaveOwner = true;
+            if (autosaveOn && autosaveReady) autosaveWrite();
+            return hold();
+        }).catch(() => {});
+    });
+}
+
+function scheduleAutosave() {
+    if (!autosaveOn || !autosaveReady || !autosaveOwner) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(autosaveWrite, 400);
+}
+
+function autosaveWrite() {
+    clearTimeout(autosaveTimer);
+    if (!autosaveOn || !autosaveReady || !autosaveOwner) return;
+    const json = hasWork()
+        ? JSON.stringify({ json_version: SESSION_VERSION, active: tabs.indexOf(active), show: showMode,
+                           shadows: tabs.map(t => ({ ...tabToData(t), uid: t.uid })) })
+        : null;
+    const keep = new Set(tabs.filter(t => t.imageFile).map(t => 'img:' + t.uid));
+    autosaveTx('readwrite', store => {
+        if (json) store.put(json, 'session'); else store.delete('session');
+        store.getAllKeys().onsuccess = e => {
+            const have = new Set(e.target.result);
+            have.forEach(k => { if (k !== 'session' && !keep.has(k)) store.delete(k); });
+            tabs.forEach(t => { if (t.imageFile && !have.has('img:' + t.uid)) store.put(t.imageFile, 'img:' + t.uid); });
+        };
+    }).catch(autosaveFailed);
+}
+
+const autosaveClearStore = () => autosaveTx('readwrite', store => { store.clear(); }).catch(() => {});
+
+async function autosaveRestore() {
+    await claimAutosave();
+    if (!autosaveOn) { if (autosaveOwner) await autosaveClearStore(); autosaveReady = true; return; }
+    let json = null;
+    try { json = await autosaveTx('readonly', store => store.get('session')); }
+    catch { autosaveReady = true; return; }   // no IndexedDB here: work without autosave
+    if (json != null) {
+        try {
+            const data = JSON.parse(json);
+            const list = (Array.isArray(data.shadows) ? data.shadows : []).filter(sd => sd && typeof sd === 'object');
+            if (!list.length) throw new Error('empty');
+            const images = [];
+            for (const sd of list.slice(0, MAX_OBS)) {
+                const f = typeof sd.uid === 'string' ? await autosaveTx('readonly', store => store.get('img:' + sd.uid)) : null;
+                images.push(f instanceof Blob ? new File([f], f.name || sd.imageFilename || 'photo', { type: f.type }) : null);
+            }
+            if (data.show === 'one' || data.show === 'all') showMode = data.show;
+            applySession(list, images, data.active);
+        } catch {
+            if (autosaveOwner) await autosaveClearStore();
+            showToast('The saved session could not be restored. Starting fresh.');
+        }
+    }
+    autosaveReady = true;
+}
+
+function setAutosave(on) {
+    autosaveOn = on;
+    localStorage.setItem(AUTOSAVE_KEY, on ? '1' : '0');
+    if (on) { autosaveWarned = false; autosaveWrite(); showToast('Autosave on: your work is kept in this browser.', 'success'); }
+    else { autosaveClearStore(); showToast('Autosave off: the saved copy was deleted.', 'success'); }
+}
+
+function clearSaved() {
+    if (!autosaveOwner) return showToast('ShadowFinder is open in another tab: clear the saved session there.');
+    if (!confirm('Delete the saved session and start empty? This cannot be undone.')) return;
+    autosaveClearStore().then(() => {
+        tabs.forEach(t => { clearTimeout(t.timer); t.token++; });
+        tabs = [newTab()];
+        active = tabs[0];
+        if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
+        syncObservations(); renderBands(); loadTabIntoUI();
+        showToast('Saved session cleared.', 'success');
+    });
+}
+
+// ---- the session menu (☰ at the right end of the input bar) ----
+
+function renderSessionMenu() {
+    const menu = $('session-menu');
+    menu.innerHTML = '';
+    const close = () => openSessionMenu(false);
+    const section = title => { const s = document.createElement('div'); s.className = 'panel-title'; s.textContent = title; menu.appendChild(s); };
+    const arrow = up => `<span class="export-icon"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${
+        up ? '<line x1="5" y1="9" x2="5" y2="2"/><polyline points="2,4.5 5,1.5 8,4.5"/>' : '<line x1="5" y1="1" x2="5" y2="8"/><polyline points="2,5.5 5,8.5 8,5.5"/>'}</svg></span>`;
+    const entry = (html, title, enabled, action) => {
+        const it = document.createElement('div');
+        it.className = 'session-item' + (enabled ? '' : ' disabled');
+        it.setAttribute('role', 'menuitem');
+        it.innerHTML = html;
+        it.title = title;
+        if (enabled) it.addEventListener('click', () => { close(); action(); });
+        menu.appendChild(it);
+    };
+    const switchRow = (label, title, checked, onChange, extra = '') => {
+        const r = document.createElement('div');
+        r.className = 'session-switch';
+        r.title = title;
+        const id = 'sw-' + label.toLowerCase().replace(/\W+/g, '-');
+        r.innerHTML = `<label for="${id}">${label}</label><span class="session-row-end">${extra}<input type="checkbox" id="${id}" class="adjust-switch" role="switch" ${checked ? 'checked' : ''}></span>`;
+        r.querySelector('input').addEventListener('change', e => onChange(e.target.checked));
+        menu.appendChild(r);
+        return r;
+    };
+
+    section('File');
+    entry(`${arrow(true)} Import…`, 'Open a ShadowFinder session file (.json)', true, () => $('json-picker').click());
+    entry(`${arrow(false)} Export this shadow`, 'Save the selected shadow: its points or typed values, its time and settings', tabHasWork(active), exportThis);
+    entry(`${arrow(false)} Export all`, 'Save every shadow as one file', tabs.some(tabHasWork), exportAll);
+    switchRow('Include photos', 'Store each photo inside the exported file, unchanged, with its EXIF and GPS, so an import restores it without asking. The file gets about a third bigger than the photos.',
+        exportPhotos, on => { exportPhotos = on; localStorage.setItem(EXPORT_PHOTOS_KEY, on ? '1' : '0'); renderSessionMenu(); });
+    if (exportPhotos) {
+        const n = document.createElement('div');
+        n.className = 'session-note';
+        n.textContent = 'Photos go into the file with their GPS data; it gets much bigger.';
+        menu.appendChild(n);
+    }
+
+    section('This browser');
+    const row = switchRow('Autosave', 'Keep the work in this browser so a refresh does not lose it. Off deletes the saved copy.',
+        autosaveOn, on => { setAutosave(on); renderSessionMenu(); },
+        `<button type="button" class="btn-clear-saved" ${autosaveOn && autosaveOwner && hasWork() ? '' : 'disabled'} title="Delete the saved session and start empty">Clear</button>`);
+    row.querySelector('button').addEventListener('click', () => { close(); clearSaved(); });
+
+    section('Demo');
+    entry('Teal box, Germany, April 2024', 'Load the demo photo; mark the teal box and its shadow', true, loadDemo);
+}
+
+function openSessionMenu(show) {
+    if (show) renderSessionMenu();
+    $('session-menu').style.display = show ? 'block' : 'none';
+    $('btn-session').setAttribute('aria-expanded', String(show));
+}
+$('btn-session').addEventListener('click', e => { e.stopPropagation(); openSessionMenu($('session-menu').style.display === 'none'); });
+document.addEventListener('click', e => { if (!$('session-wrap').contains(e.target)) openSessionMenu(false); });
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') openSessionMenu(false);
+    // Ctrl+S saves everything, as in TracePoint
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); exportAll(); }
 });
 
 // ---- HELP ----
@@ -1929,3 +2467,4 @@ $('btn-help-close').addEventListener('click', () => { $('help-card').style.displ
 // ---- START ----
 
 loadTabIntoUI();
+autosaveRestore();
