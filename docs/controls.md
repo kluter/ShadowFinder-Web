@@ -2,6 +2,10 @@
 
 Everything ShadowFinder Web can do, panel by panel. The photo and all input are on the left; the map is on the right.
 
+## Divider
+
+Drag the bar between the photo and the map to resize them; the width is remembered. Double-click it for 50/50, or focus it and use `←` / `→` (`Shift` for bigger steps). The chevron on it hides the photo side for a full-width map, and brings it back.
+
 ## Shadows (tabs)
 
 Each tab is one **shadow**: a photo with three marked points, or a typed height and shadow length, plus its capture time. Its band is recalculated as soon as the input is complete, so there is no Calculate button.

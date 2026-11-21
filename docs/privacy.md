@@ -30,12 +30,13 @@ So that a refresh does not lose work, ShadowFinder Web saves the shadows **and t
 - A private window works as usual; the browser deletes the copy when the window closes.
 - With the app open in two tabs, only the first one saves. The second restores the saved work, but its changes are not saved until the first tab is closed, and **Clear** works only in the first.
 
-Coordinate pins and GPS pins are not saved. Besides that, `localStorage` holds four settings. `sessionStorage` and cookies are unused.
+Coordinate pins and GPS pins are not saved. Besides that, `localStorage` holds five settings. `sessionStorage` and cookies are unused.
 
 ```javascript
 // Verify in DevTools → Application → Storage
 // localStorage:  { "sf-tileset": "dark" }        ← base map
 //                { "sf-projection": "globe" }    ← globe or 2D
+//                { "sf-split": "50.00" }         ← width of the photo side in percent
 //                { "sf-autosave": "1" }          ← autosave on/off
 //                { "sf-export-photos": "1" }     ← "Include photos" on/off
 // IndexedDB:     shadowfinder → autosave         ← "session" (the shadows, as in an export) + one "img:…" per photo

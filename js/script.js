@@ -715,10 +715,10 @@ window.addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = fals
 // Space released in another window never reaches this one
 window.addEventListener('blur', () => { spaceHeld = false; });
 
-// A resize refits a photo that was fitted; a zoomed or panned one keeps its zoom, with the
-// same spot of the photo in the middle.
-window.addEventListener('resize', () => {
-    if (!img) return;
+// A new size of the photo panel (the window, or the divider) refits a photo that was fitted; a
+// zoomed or panned one keeps its zoom, with the same spot of the photo in the middle.
+new ResizeObserver(() => {
+    if (!img || !container.clientWidth) return;   // no photo, or the photo side is folded away
     if (viewFitted) fitImage();
     else {
         const c = canvasToImage(canvas.width / 2, canvas.height / 2);
@@ -727,7 +727,7 @@ window.addEventListener('resize', () => {
         offsetY = canvas.height / 2 - c.y * scale;
     }
     drawCanvas();
-});
+}).observe(container);
 
 // Drop: the first photo goes into the current tab (or a new one if this tab already has a
 // photo with a band), any further photos into new tabs, up to the cap.
@@ -2947,6 +2947,77 @@ $('btn-help').addEventListener('click', () => {
     card.style.display = card.style.display === 'none' ? 'block' : 'none';
 });
 $('btn-help-close').addEventListener('click', () => { $('help-card').style.display = 'none'; });
+
+// ---- DIVIDER between photo and map (as in TracePoint) ----
+// Drag the handle to resize, double-click for 50/50, arrow keys when it has focus (Shift: 10%).
+// The photo side's share is a percentage in --split on #app, so it scales with the window. Each
+// side keeps its minimum width: minA for the photo side (below ~560 px the shadow tabs get cut),
+// minB for the map (its bars fit down to ~420 px). The share is remembered; folding the photo
+// side away is not, since the input lives there and a page loading without it would look broken.
+// The canvas follows through its ResizeObserver, the map through MapLibre's own.
+
+function makeSplitter(handle, box, { cssVar, key, minA = 560, minB = 420, start = 50, enabled = () => true }) {
+    let pct = start;
+    const size  = () => box.clientWidth || 1;
+    const clamp = p => {
+        const lo = minA / size() * 100, hi = 100 - minB / size() * 100;
+        // a window too narrow for both minimums splits in their proportion
+        if (lo > hi) return minA / (minA + minB) * 100;
+        return Math.max(lo, Math.min(hi, p));
+    };
+    function set(p, save) {
+        pct = clamp(p);
+        box.style.setProperty(cssVar, `${pct.toFixed(2)}%`);
+        handle.setAttribute('aria-valuenow', Math.round(pct));
+        if (save) prefs.set(key, pct.toFixed(2));
+    }
+
+    handle.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('button') || !enabled()) return;
+        handle.setPointerCapture(e.pointerId);
+        handle.classList.add('dragging');
+        document.body.classList.add('pane-resizing');
+        e.preventDefault();
+        handle.focus();
+    });
+    handle.addEventListener('pointermove', e => {
+        if (!handle.classList.contains('dragging')) return;
+        const r = box.getBoundingClientRect();
+        set((e.clientX - r.left) / r.width * 100, false);
+    });
+    const end = () => {
+        if (!handle.classList.contains('dragging')) return;
+        handle.classList.remove('dragging');
+        document.body.classList.remove('pane-resizing');
+        set(pct, true);
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+    handle.addEventListener('dblclick', e => { if (!e.target.closest('button') && enabled()) set(start, true); });
+    handle.addEventListener('keydown', e => {
+        if (e.target !== handle || !enabled()) return;
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        set(pct + (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 10 : 1), true);
+    });
+    window.addEventListener('resize', () => set(pct, false));   // the pixel minimums follow the window
+
+    const saved = parseFloat(prefs.get(key));
+    set(Number.isFinite(saved) ? saved : start, false);
+}
+
+(() => {
+    const app = $('app'), btn = $('btn-pane-collapse');
+    const collapsed = () => app.classList.contains('photo-collapsed');
+    makeSplitter($('pane-splitter'), app, { cssVar: '--split', key: 'sf-split', minA: 560, minB: 420, enabled: () => !collapsed() });
+    btn.addEventListener('click', () => {
+        const on = app.classList.toggle('photo-collapsed');
+        const label = on ? 'Show the photo side' : 'Hide the photo side';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.blur();
+    });
+})();
 
 // ---- START ----
 
