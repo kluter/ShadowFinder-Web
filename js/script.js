@@ -8,7 +8,26 @@ const ctx       = canvas.getContext('2d');
 const container = $('image-container');
 const overlay   = $('drop-overlay');
 
+// localStorage, without throwing where the browser blocks storage (the app then just forgets).
+const prefs = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
 // ---- TOAST ----
+
+// A toast: the message as text (never markup) and a close button.
+function toastItem(msg, cls) {
+    const item = document.createElement('div');
+    item.className = 'toast-item' + cls;
+    const text = document.createElement('span');
+    text.textContent = msg;
+    const close = document.createElement('button');
+    close.className = 'toast-close';
+    close.textContent = '×';
+    item.append(text, close);
+    return item;
+}
 
 const toastCounts = new Map();
 const TOAST_DURATION = 4500;
@@ -19,9 +38,7 @@ function showToast(msg, type = 'error') {
     if (count >= TOAST_MAX_STACK) return;
     toastCounts.set(msg, count + 1);
     const tc = $('toast-container');
-    const item = document.createElement('div');
-    item.className = 'toast-item' + (type === 'success' ? ' toast-success' : '');
-    item.innerHTML = `<span>${msg}</span><button class="toast-close">×</button>`;
+    const item = toastItem(msg, type === 'success' ? ' toast-success' : '');
     item.querySelector('.toast-close').onclick = () => dismissToast(item, msg);
     tc.appendChild(item);
     requestAnimationFrame(() => item.classList.add('toast-visible'));
@@ -44,9 +61,7 @@ function setStickyToast(msg, type) {
     if (stickyToast) { stickyToast.remove(); stickyToast = null; }
     if (!msg) return;
     const tc = $('toast-container');
-    const item = document.createElement('div');
-    item.className = 'toast-item' + (type === 'warn' ? ' toast-warn' : '');
-    item.innerHTML = `<span>${msg}</span><button class="toast-close">×</button>`;
+    const item = toastItem(msg, type === 'warn' ? ' toast-warn' : '');
     item.querySelector('.toast-close').onclick = () => {
         item.remove();
         if (stickyToast === item) stickyToast = null;
@@ -71,7 +86,7 @@ const MAX_OBS = 3;
 // MapLibre GL (bundled in vendor/, exposed by js/maplibre-global.js). Globe or flat
 // (Web Mercator), switched in the map bar and remembered.
 const PROJECTIONS = ['globe', 'mercator'];
-let projection = PROJECTIONS.includes(localStorage.getItem('sf-projection')) ? localStorage.getItem('sf-projection') : 'globe';
+let projection = PROJECTIONS.includes(prefs.get('sf-projection')) ? prefs.get('sf-projection') : 'globe';
 
 const map = new maplibregl.Map({
     container: 'map-container',
@@ -113,7 +128,7 @@ const frameZoom = () => projection === 'globe' ? globeFitZoom() : 1.2;
 
 async function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
-    localStorage.setItem('sf-projection', projection);
+    prefs.set('sf-projection', projection);
     syncProjectionToggle();
     $('map-container').classList.toggle('space', projection === 'globe');
     await mapReady;
@@ -188,7 +203,7 @@ const TILE_SETS = [
 let activeBaseIds = [];
 async function setTileSet(id) {
     const set = TILE_SETS.find(s => s.id === id) || TILE_SETS[0];
-    localStorage.setItem('sf-tileset', set.id);
+    prefs.set('sf-tileset', set.id);
     $('basemap-name').textContent = set.label;
     document.querySelectorAll('#basemap-menu .layer-item').forEach(i =>
         i.classList.toggle('active', i.dataset.id === set.id));
@@ -228,7 +243,7 @@ async function setTileSet(id) {
     map.on('mousedown', () => open(false));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') open(false); });
 })();
-setTileSet(localStorage.getItem('sf-tileset') || 'dark');
+setTileSet(prefs.get('sf-tileset') || 'dark');
 
 // ---- OBSERVATIONS (one per tab) ----
 //
@@ -239,10 +254,12 @@ setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 const ADJUST_DEFAULT = { contrast: 100, brightness: 100, saturation: 100, invert: false };
 
 let tabSeq = 0;
+// Names a tab's photo in the autosave: a new photo gets a new one, so it is stored afresh.
+const newUid = () => crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 function newTab() {
     return {
         id: ++tabSeq,
-        uid: (crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2)),
+        uid: newUid(),
         img: null,          // HTMLImageElement of the photo, if any
         imageFile: null,    // the photo as a file (session export with photos, autosave)
         pendingImage: '',   // restored session: the file name of the photo it waits for
@@ -323,9 +340,15 @@ function addTab() {
     switchTab(t);
 }
 
-function removeTab(t) {
+// Stops a tab's pending or running calculation (a running one sees the new token and drops its result).
+function cancelCalc(t) {
     clearTimeout(t.timer);
-    t.token++;   // drop any calculation still running for it
+    t.token++;
+    t.busy = false;
+}
+
+function removeTab(t) {
+    cancelCalc(t);
     removeExifGps(t);   // its GPS pin goes with it
     if (tabs.length === 1) {
         // closing the last shadow is the clear-all: start fresh
@@ -358,7 +381,7 @@ function loadTabIntoUI() {
     if (img) {
         canvas.style.display = 'block';
         overlay.style.display = 'none';
-        if (t.view) { fitCanvasToContainer(); ({ scale, offsetX, offsetY } = t.view); }
+        if (t.view && !t.view.fitted) { fitCanvasToContainer(); ({ scale, offsetX, offsetY } = t.view); viewFitted = false; }
         else fitImage();
     } else {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -382,7 +405,7 @@ function loadTabIntoUI() {
 }
 
 function saveView() {
-    if (active && active.img) active.view = { scale, offsetX, offsetY };
+    if (active && active.img) active.view = { scale, offsetX, offsetY, fitted: viewFitted };
 }
 
 // ---- PHOTO ----
@@ -390,6 +413,7 @@ function saveView() {
 let img = null;
 let points = [];
 let scale = 1, offsetX = 0, offsetY = 0;
+let viewFitted = true;   // the photo is as fitImage() placed it (not zoomed or panned since)
 let isPanning = false, panStartX = 0, panStartY = 0, panOffsetX = 0, panOffsetY = 0;
 let spaceHeld = false;
 
@@ -403,6 +427,8 @@ function loadImage(file, tab = active, onReady = null, { restore = !!tab.pending
     const image = new Image();
     const imageLoaded = new Promise((resolve, reject) => {
         image.onload = () => {
+            URL.revokeObjectURL(url);   // decoded: the image draws without it
+            if (!restore) tab.uid = newUid();
             tab.img = image;
             tab.imageFile = file;
             tab.fileName = file.name || '';
@@ -419,11 +445,13 @@ function loadImage(file, tab = active, onReady = null, { restore = !!tab.pending
             if (tab === active) loadTabIntoUI(); else renderTabs();
             resolve();
         };
-        image.onerror = () => { showToast('Could not load image.'); reject(); };
+        image.onerror = () => { URL.revokeObjectURL(url); showToast('Could not load image.'); reject(); };
     });
     image.src = url;
 
-    const exifRead = exifr.parse(file, { tiff: true, exif: true, gps: true })
+    // reviveValues off: the dates stay the text written in the file. Revived, exifr builds them
+    // in this browser's time zone, which moves a time inside a daylight-saving gap by an hour.
+    const exifRead = exifr.parse(file, { tiff: true, exif: true, gps: true, reviveValues: false })
         .then(exif => { tab.exif = exif || null; })
         .catch(() => { tab.exif = null; });
     if (!restore) { tab.exif = null; tab.exifDt = null; }
@@ -453,6 +481,7 @@ function fitCanvasToContainer() {
 
 function fitImage() {
     fitCanvasToContainer();
+    viewFitted = true;
     const cw = canvas.width, ch = canvas.height;
     const iw = img.naturalWidth, ih = img.naturalHeight;
     scale = Math.min(cw / iw, ch / ih, 1);
@@ -626,7 +655,8 @@ window.addEventListener('mousemove', e => {
 window.addEventListener('mouseup', e => {
     if (dragIdx < 0) return;
     dragIdx = -1;
-    suppressClick = true;   // the click that ends a drag places no point
+    // the click that ends a drag places no point; released off the photo, no click follows
+    suppressClick = e.target === canvas;
     const { x, y } = canvasXY(e);
     canvas.style.cursor = idleCursor(x, y);
 });
@@ -655,6 +685,7 @@ container.addEventListener('wheel', e => {
     offsetX = mx - (mx - offsetX) * (newScale / scale);
     offsetY = my - (my - offsetY) * (newScale / scale);
     scale = newScale;
+    viewFitted = false;
     drawCanvas();
 }, { passive: false });
 
@@ -670,6 +701,7 @@ canvas.addEventListener('mousedown', e => {
 window.addEventListener('mousemove', e => {
     if (!isPanning) return;
     offsetX = panOffsetX + (e.clientX - panStartX);
+    viewFitted = false;
     offsetY = panOffsetY + (e.clientY - panStartY);
     drawCanvas();
 });
@@ -685,10 +717,20 @@ window.addEventListener('keydown', e => {
     if (e.code === 'Space' && !isTyping(e.target)) { spaceHeld = true; e.preventDefault(); }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = false; });
+// Space released in another window never reaches this one
+window.addEventListener('blur', () => { spaceHeld = false; });
 
+// A resize refits a photo that was fitted; a zoomed or panned one keeps its zoom, with the
+// same spot of the photo in the middle.
 window.addEventListener('resize', () => {
     if (!img) return;
-    fitImage();
+    if (viewFitted) fitImage();
+    else {
+        const c = canvasToImage(canvas.width / 2, canvas.height / 2);
+        fitCanvasToContainer();
+        offsetX = canvas.width / 2 - c.x * scale;
+        offsetY = canvas.height / 2 - c.y * scale;
+    }
     drawCanvas();
 });
 
@@ -705,6 +747,9 @@ container.addEventListener('drop', e => {
 });
 
 function loadFiles(files) {
+    // a shadow that already has its band keeps it: the photo starts a new shadow (at the cap it
+    // replaces the current one's photo, as before)
+    if (active.img && active.result && tabs.length < MAX_OBS) { const t = newTab(); tabs.push(t); switchTab(t); }
     let target = active;
     files.forEach((f, i) => {
         if (i > 0) {
@@ -1102,20 +1147,26 @@ function applyExifDateTime(tab = active, { quiet = true } = {}) {
         syncModeToggle();
         syncExifChip();
     }
-    if (!quiet) showToast(`Date and time taken from the photo's EXIF (${ext.mode === 'local' ? 'local time' : 'UTC'}). Check them before relying on the result.`, 'success');
+    if (!quiet) showToast(ext.offset
+        ? `Date and time taken from the photo's EXIF, converted to UTC with its offset (${ext.offset}). Check them before relying on the result.`
+        : "Date and time taken from the photo's EXIF, read as UTC (it has no time-zone offset). Check them before relying on the result.", 'success');
     return true;
 }
 
-// The capture time in an EXIF record, as { dt, mode }, or null.
+// Each EXIF time with the offset tag that belongs to it.
+const EXIF_TIME_TAGS = [['DateTimeOriginal', 'OffsetTimeOriginal'], ['DateTimeDigitized', 'OffsetTimeDigitized'], ['DateTime', 'OffsetTime']];
+
+// The capture time in an EXIF record, as { dt, mode, offset }, or null.
 function readExifTime(ex) {
     if (!ex) return null;
-    const raw = pick(ex, 'DateTimeOriginal', 'DateTimeDigitized', 'DateTime');
-    if (!raw) return null;
+    const tags = EXIF_TIME_TAGS.find(([k]) => ex[k] != null);
+    if (!tags) return null;
+    const raw = ex[tags[0]];
     let year, month, day, hour, minute, second = 0;
 
     if (raw instanceof Date) {
-        // exifr builds the Date from the EXIF wall-clock with LOCAL constructors, so the
-        // local getters read back exactly the digits stored in the file (no timezone shift).
+        // Only from an older exifr setup (dates revived): built with local constructors, so
+        // the local getters read back the digits stored in the file.
         year = raw.getFullYear(); month = raw.getMonth() + 1; day = raw.getDate();
         hour = raw.getHours(); minute = raw.getMinutes(); second = raw.getSeconds();
     } else if (typeof raw === 'string') {
@@ -1124,14 +1175,24 @@ function readExifTime(ex) {
         year = +m[1]; month = +m[2]; day = +m[3];
         hour = +m[4]; minute = +m[5]; second = m[6] ? +m[6] : 0;
     } else return null;
+    // A camera whose clock was never set writes "0000:00:00 00:00:00": no time at all.
+    if (year < 1900 || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) ||
+        hour > 23 || minute > 59 || second > 59) return null;
 
-    // An EXIF offset tag means the stored wall-clock is local time; with no offset we take
-    // the value as already UTC (e.g. images prepared with the capture time written in UTC).
-    const offsetStr = pick(ex, 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
-    const useLocal = typeof offsetStr === 'string' && /[+-]\d{2}:\d{2}/.test(offsetStr);
+    // An offset tag ("+02:00") says how far the camera's clock was from UTC, so the exact UTC
+    // instant follows from it: better than Local mode, which assumes the zone of every place.
+    // With no offset the value is taken as already UTC (e.g. images prepared with the capture
+    // time written in UTC); the user can switch to Local.
+    const offsetStr = pick(ex, tags[1], 'OffsetTimeOriginal', 'OffsetTime', 'OffsetTimeDigitized');
+    const om = typeof offsetStr === 'string' && offsetStr.match(/^\s*([+-])(\d{2}):(\d{2})/);
+    let ms = Date.UTC(year, month - 1, day, hour, minute, second);
+    if (om) ms -= (om[1] === '-' ? -1 : 1) * (+om[2] * 60 + +om[3]) * 60000;
+    const u = new Date(ms);
     return {
-        dt: { y: String(year), mo: pad2(month), d: pad2(day), h: pad2(hour), mi: pad2(minute), s: pad2(second) },
-        mode: useLocal ? 'local' : 'utc',
+        dt: { y: String(u.getUTCFullYear()), mo: pad2(u.getUTCMonth() + 1), d: pad2(u.getUTCDate()),
+              h: pad2(u.getUTCHours()), mi: pad2(u.getUTCMinutes()), s: pad2(u.getUTCSeconds()) },
+        mode: 'utc',
+        offset: om ? om[0].trim() : '',
     };
 }
 
@@ -1290,7 +1351,7 @@ function resetMeasurement() {
     t.points.length = 0;
     t.h = ''; t.l = '';
     t.result = null; t.noMatch = false; t.framed = false;
-    clearTimeout(t.timer); t.token++;
+    cancelCalc(t);
     syncObservations();
     renderBands();
     canvas.style.cursor = idleCursor();
@@ -1306,7 +1367,7 @@ function resetTime() {
     const t = active;
     SEGS.forEach(s => setSeg(s, ''));
     t.result = null; t.noMatch = false; t.framed = false;
-    clearTimeout(t.timer); t.token++;
+    cancelCalc(t);
     syncObservations();
     renderBands();
     onDtChanged();
@@ -1427,12 +1488,26 @@ buildGuide();
 
 // Called after any change to a tab's input: refreshes the left side and recalculates the band
 // shortly after typing (or dragging) stops, once the input is complete. A quiet update (a point
-// being dragged) does not pulse the band.
+// being dragged) does not pulse the band. Once the input is incomplete or invalid, the band it
+// had goes (and a calculation still running for the old input is dropped), so the map never
+// shows a band for values that are no longer in the fields.
 function onInputChanged(t, { delay = 350, quiet = false } = {}) {
+    const complete = !!getMeasurements(t) && dtEpoch(t) != null;
+    if (!complete) {
+        const wasBusy = t.busy;
+        cancelCalc(t);
+        if (t.result || t.noMatch || wasBusy) {
+            t.result = null; t.noMatch = false;
+            syncObservations();
+            renderBands();
+            refreshPinPopup();
+            renderTabs();
+        }
+    }
     if (t === active) { updateMeasureUI(); updateGuide(); }
     scheduleAutosave();
     clearTimeout(t.timer);
-    if (!getMeasurements(t) || dtEpoch(t) == null) return;
+    if (!complete) return;
     t.quiet = quiet;
     t.timer = setTimeout(() => calculateTab(t), delay);
 }
@@ -1516,41 +1591,69 @@ function getTzOffsetMinutes(tzName, date) {
 
 // ---- SHADOW MATH ----
 
+// The sun at one moment, by SunCalc's own formulas (so the result is the same), split into the
+// part that depends only on the time and the part that depends on the place:
+//   sin(altitude) = sin(lat)·sinDec + cos(lat)·cosDec·cos(theta + lng)
+// theta is the sun's hour angle at longitude 0 (radians); the sun is overhead at lat = dec,
+// lng = -theta.
+const D2R = Math.PI / 180;
+function sunAt(ms) {
+    const d = ms / 86400000 - 0.5 + 2440588 - 2451545;   // days since J2000.0
+    const M = D2R * (357.5291 + 0.98560028 * d);          // mean anomaly
+    const C = D2R * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    const L = M + C + D2R * 102.9372 + Math.PI;           // ecliptic longitude
+    const e = D2R * 23.4397;                              // obliquity of the ecliptic
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+    const theta = D2R * (280.16 + 360.9856235 * d) - ra;  // sidereal time at Greenwich − RA
+    return { dec, theta, sinDec: Math.sin(dec), cosDec: Math.cos(dec) };
+}
+const sinSunAlt = (sun, lat, lng) =>
+    Math.sin(lat * D2R) * sun.sinDec + Math.cos(lat * D2R) * sun.cosDec * Math.cos(sun.theta + lng * D2R);
+
 function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
     // Layout (GRID, MATCH_TOL) is shared with contours.js, which outlines the band.
-    const lats = [];
-    for (let i = 0; i < GRID.rows; i++) lats.push(GRID.minLat + i * GRID.res);
-    const lons = [];
-    for (let j = 0; j < GRID.cols; j++) lons.push(GRID.minLon + j * GRID.res);
+    const { rows, cols } = GRID;
+    const offsetMap = mode === 'local' ? tzGrid?._offsetMap : null;
 
-    const numLons = lons.length;
-    const offsetMap = tzGrid?._offsetMap;
+    const sinLat = new Float64Array(rows), cosLat = new Float64Array(rows);
+    for (let i = 0; i < rows; i++) {
+        const lat = (GRID.minLat + i * GRID.res) * D2R;
+        sinLat[i] = Math.sin(lat); cosLat[i] = Math.cos(lat);
+    }
+    // The sun and cos(hour angle) per column, once per clock offset: one in UTC mode, one per
+    // distinct zone offset in Local mode. Everything else per cell is a multiply-add.
+    const bySun = new Map();
+    const sunFor = offsetMin => {
+        let s = bySun.get(offsetMin);
+        if (!s) {
+            const sun = sunAt(baseEpochMs - offsetMin * 60000);
+            const cosH = new Float64Array(cols);
+            for (let j = 0; j < cols; j++) cosH[j] = Math.cos(sun.theta + (GRID.minLon + j * GRID.res) * D2R);
+            s = { sinDec: sun.sinDec, cosDec: sun.cosDec, cosH };
+            bySun.set(offsetMin, s);
+        }
+        return s;
+    };
+    const utcSun = sunFor(0);
 
     // grid holds the relative shadow-length error per cell, continuous so the band edge can be
     // interpolated between cells (Infinity = sun below the horizon). A cell is in the band
     // when its error is below MATCH_TOL. One grid per observation.
-    const grid = new Float32Array(lats.length * numLons).fill(Infinity);
+    const grid = new Float32Array(rows * cols).fill(Infinity);
     let count = 0;
 
-    for (let i = 0; i < lats.length; i++) {
-        for (let j = 0; j < numLons; j++) {
-            const lat = lats[i], lon = lons[j];
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const idx = i * cols + j;
+            const s = offsetMap ? sunFor(offsetMap.get(tzGrid.timezones[idx]) ?? 0) : utcSun;
+            const sinAlt = sinLat[i] * s.sinDec + cosLat[i] * s.cosDec * s.cosH[j];
+            if (sinAlt <= 0) continue;   // sun at or below the horizon
 
-            let dt;
-            if (mode === 'local' && offsetMap) {
-                const tzName = tzGrid.timezones[i * numLons + j];
-                const offsetMin = offsetMap.get(tzName) ?? 0;
-                dt = new Date(baseEpochMs - offsetMin * 60000);
-            } else {
-                dt = new Date(baseEpochMs);
-            }
-
-            const alt = SunCalc.getPosition(dt, lat, lon).altitude;
-            if (alt <= 0) continue;
-
-            const calcShadow = objectHeight / Math.tan(alt);
+            // shadow = height / tan(altitude) = height · cos / sin
+            const calcShadow = objectHeight * Math.sqrt(Math.max(0, 1 - sinAlt * sinAlt)) / sinAlt;
             const diff = Math.abs(calcShadow - shadowLength) / shadowLength;
-            grid[i * numLons + j] = diff;
+            grid[idx] = diff;
             if (diff < MATCH_TOL) count++;
         }
     }
@@ -1572,16 +1675,20 @@ const BAND_IMG_W  = 1440;   // 2 px per 0.5° grid column
 const BAND_MERC_TOP = mercY(GRID.maxLat), BAND_MERC_BOT = mercY(GRID.minLat);
 const BAND_IMG_H  = Math.round((BAND_MERC_TOP - BAND_MERC_BOT) / (2 * Math.PI) * BAND_IMG_W);
 
-// Grid row / column for each image row / column (nearest cell).
+// Grid row / column nearest to a latitude / longitude. A grid value was sampled exactly at its
+// coordinate, so it is drawn centred there (as the GeoJSON outline and the pin read it), not over
+// the cell north-east of it. Longitude wraps: +180 is column 0 again.
+const nearestRow = lat => Math.min(GRID.rows - 1, Math.max(0, Math.round((lat - GRID.minLat) / GRID.res)));
+const nearestCol = lon => ((Math.round((lon - GRID.minLon) / GRID.res) % GRID.cols) + GRID.cols) % GRID.cols;
+
+// Grid row / column for each image row / column.
 const BAND_ROW_GI = new Int32Array(BAND_IMG_H);
 for (let py = 0; py < BAND_IMG_H; py++) {
-    const lat = latOfMercY(BAND_MERC_TOP - (py + 0.5) / BAND_IMG_H * (BAND_MERC_TOP - BAND_MERC_BOT));
-    BAND_ROW_GI[py] = Math.min(GRID.rows - 1, Math.max(0, Math.floor((lat - GRID.minLat) / GRID.res)));
+    BAND_ROW_GI[py] = nearestRow(latOfMercY(BAND_MERC_TOP - (py + 0.5) / BAND_IMG_H * (BAND_MERC_TOP - BAND_MERC_BOT)));
 }
 const BAND_COL_GJ = new Int32Array(BAND_IMG_W);
 for (let px = 0; px < BAND_IMG_W; px++) {
-    const lon = GRID.minLon + (px + 0.5) / BAND_IMG_W * (GRID.maxLon - GRID.minLon);
-    BAND_COL_GJ[px] = Math.min(GRID.cols - 1, Math.floor((lon - GRID.minLon) / GRID.res));
+    BAND_COL_GJ[px] = nearestCol(GRID.minLon + (px + 0.5) / BAND_IMG_W * (GRID.maxLon - GRID.minLon));
 }
 
 // ---- Layers on the map ----
@@ -1621,7 +1728,7 @@ function setPalette(id) {
     bandLut = new Uint8ClampedArray(256 * 4);   // the band colour for 256 steps of t
     for (let k = 0; k < 256; k++) bandLut.set(palette.band(k / 255).map(Math.round), k * 4);
 }
-setPalette(localStorage.getItem('sf-tileset') || 'dark');
+setPalette(prefs.get('sf-tileset') || 'dark');
 const shadeName = () => palette.shade.day ? 'Daylight' : 'Night';
 
 // One band pixel at match error fraction t (0 exact … 1 the tolerance edge).
@@ -1675,12 +1782,12 @@ function paintBandImage(grids) {
 const DAY_IMG_W = 720, DAY_IMG_H = 720;   // Mercator from +85.05° to −85.05° is square
 let dayImgFor = null;
 function paintDaylightImage(epochMs) {
-    const date = new Date(epochMs);
+    const sun = sunAt(epochMs);
     const NLAT = 181, NLON = 361;   // 1° samples, -90..90 × -180..180
     const alt = new Float32Array(NLAT * NLON);
     for (let a = 0; a < NLAT; a++) {
         for (let o = 0; o < NLON; o++) {
-            alt[a * NLON + o] = SunCalc.getPosition(date, a - 90, o - 180).altitude * 180 / Math.PI;
+            alt[a * NLON + o] = Math.asin(sinSunAlt(sun, a - 90, o - 180)) / D2R;
         }
     }
     const img = new ImageData(DAY_IMG_W, DAY_IMG_H);
@@ -1788,6 +1895,7 @@ function pulseBand(t) {
     cancelAnimationFrame(pulseRaf);
     const t0 = performance.now(), dur = 650;
     const step = now => {
+        if (!map.getLayer(id)) return;   // its shadow was closed mid-pulse
         const k = Math.sin(Math.min(1, (now - t0) / dur) * Math.PI);
         map.setPaintProperty(id, 'raster-opacity', base + (1 - base) * k);
         map.setPaintProperty(id, 'raster-brightness-min', 0.35 * k);
@@ -1858,19 +1966,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $('layers-ca
 // A UTC band is a ring around the point where the sun stood straight overhead; this turns the map
 // there. A Local band has no single such point (every place has its own clock), so it stays off.
 
-// The subsolar point, from the sun's declination, right ascension and Greenwich sidereal time
-// (low-precision almanac formulas, good to ~0.01°).
+// The subsolar point, from the same sun model as the bands, so it is the exact centre of the ring.
 function subsolarPoint(ms) {
-    const R2D = 180 / Math.PI;
-    const d = ms / 86400000 + 2440587.5 - 2451545.0;   // days since J2000.0
-    const g = (357.529 + 0.98560028 * d) / R2D;
-    const q = 280.459 + 0.98564736 * d;
-    const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) / R2D;
-    const e = (23.439 - 0.00000036 * d) / R2D;
-    const ra  = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) * R2D;
-    const dec = Math.asin(Math.sin(e) * Math.sin(L)) * R2D;
-    const gmst = 18.697374558 + 24.06570982441908 * d;   // hours
-    return { lat: dec, lng: ((ra - gmst * 15) % 360 + 540) % 360 - 180 };
+    const sun = sunAt(ms);
+    return { lat: sun.dec / D2R, lng: ((-sun.theta / D2R) % 360 + 540) % 360 - 180 };
 }
 
 function syncMapBarButtons() {
@@ -2050,9 +2149,7 @@ let coordPin = null;
 // Which shadows' bands cover a spot (nearest grid cell), as text for the pin.
 function bandsAt(lat, lng) {
     if (lat < GRID.minLat || lat > GRID.maxLat) return 'Outside the calculated area (60°S to 85°N)';
-    const i = Math.round((lat - GRID.minLat) / GRID.res);
-    const j = ((Math.round((lng - GRID.minLon) / GRID.res) % GRID.cols) + GRID.cols) % GRID.cols;
-    const idx = Math.min(GRID.rows - 1, i) * GRID.cols + j;
+    const idx = nearestRow(lat) * GRID.cols + nearestCol(lng);
     const withBand = tabs.filter(t => t.result);
     if (!withBand.length) return 'No band calculated yet';
     const inside = withBand.filter(t => t.result.grid[idx] < MATCH_TOL).map(t => `Shadow ${tabIndex(t)}`);
@@ -2241,14 +2338,18 @@ const EQ_W = GRID.cols * EQ_SCALE, EQ_H = GRID.rows * EQ_SCALE;
 const EQ_NORTH = GRID.minLat + GRID.rows * GRID.res; // 85
 const EQ_SOUTH = GRID.minLat;                        // -60
 
+// Grid row / column for each export pixel: the nearest sample, as on the map.
+const EQ_ROW_GI = Int32Array.from({ length: EQ_H }, (_, py) => nearestRow(EQ_NORTH - (py + 0.5) * GRID.res / EQ_SCALE));
+const EQ_COL_GJ = Int32Array.from({ length: EQ_W }, (_, px) => nearestCol(GRID.minLon + (px + 0.5) * GRID.res / EQ_SCALE));
+
 // A band (one grid) or the overlap (several), north up, in the map's colours.
 function paintEquirect(grids) {
     const img = new ImageData(EQ_W, EQ_H);
     const d = img.data, n = grids.length;
     for (let py = 0; py < EQ_H; py++) {
-        const i = GRID.rows - 1 - Math.floor(py / EQ_SCALE);
+        const base = EQ_ROW_GI[py] * GRID.cols;
         for (let px = 0; px < EQ_W; px++) {
-            const idx = i * GRID.cols + Math.floor(px / EQ_SCALE);
+            const idx = base + EQ_COL_GJ[px];
             let sum = 0, all = true;
             for (let k = 0; k < n; k++) {
                 const v = grids[k][idx];
@@ -2264,11 +2365,11 @@ function paintEquirect(grids) {
 
 // The daylight of one UTC moment over the whole Earth, 0.5° per pixel.
 function paintDaylightEquirect(ms) {
-    const W = 720, H = 360, img = new ImageData(W, H), d = img.data, date = new Date(ms);
+    const W = 720, H = 360, img = new ImageData(W, H), d = img.data, sun = sunAt(ms);
     for (let py = 0; py < H; py++) {
         const lat = 90 - (py + 0.5) * 0.5;
         for (let px = 0; px < W; px++) {
-            const alt = SunCalc.getPosition(date, lat, -180 + (px + 0.5) * 0.5).altitude * 180 / Math.PI;
+            const alt = Math.asin(sinSunAlt(sun, lat, -180 + (px + 0.5) * 0.5)) / D2R;
             putShade(d, (py * W + px) * 4, Math.min(1, Math.max(0, alt + 0.5)));
         }
     }
@@ -2332,6 +2433,8 @@ function crc32(bytes) {
     for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
     return (c ^ 0xFFFFFFFF) >>> 0;
 }
+// DOS date of every entry: 1980-01-01, the earliest valid one (0 is not a date, some tools object)
+const ZIP_DATE = (0 << 9) | (1 << 5) | 1;
 function makeZip(files) {   // files: [{ name, data: Uint8Array }]
     const enc = new TextEncoder(), parts = [], central = [];
     let offset = 0;
@@ -2339,12 +2442,12 @@ function makeZip(files) {   // files: [{ name, data: Uint8Array }]
         const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
         const h = new DataView(new ArrayBuffer(30));
         h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);   // UTF-8 names
-        h.setUint16(8, 0, true); h.setUint32(14, crc, true); h.setUint32(18, size, true); h.setUint32(22, size, true);
+        h.setUint16(8, 0, true); h.setUint16(12, ZIP_DATE, true); h.setUint32(14, crc, true); h.setUint32(18, size, true); h.setUint32(22, size, true);
         h.setUint16(26, name.length, true);
         parts.push(new Uint8Array(h.buffer), name, f.data);
         const c = new DataView(new ArrayBuffer(46));
         c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
-        c.setUint32(16, crc, true); c.setUint32(20, size, true); c.setUint32(24, size, true);
+        c.setUint16(14, ZIP_DATE, true); c.setUint32(16, crc, true); c.setUint32(20, size, true); c.setUint32(24, size, true);
         c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
         central.push(new Uint8Array(c.buffer), name);
         offset += 30 + name.length + size;
@@ -2443,9 +2546,10 @@ function exportGeoTiff() {
 function exportGeoJson() {
     if (!observations.length) return showToast('No band to export yet.');
     const fc = bandsFeatureCollection(observations);
-    fc.features.forEach(f => {
-        const t = tabs.find(t => t.result && t.result.label === f.properties.label && f.properties.kind === 'observation');
-        if (t) f.properties.shadow = `Shadow ${tabIndex(t)}`;
+    // the observation features come in the order of `observations`, the tabs that have a band
+    const withBand = tabs.filter(t => t.result);
+    fc.features.forEach((f, k) => {
+        if (f.properties.kind === 'observation' && withBand[k]) f.properties.shadow = `Shadow ${tabIndex(withBand[k])}`;
     });
     const blob = new Blob([JSON.stringify(fc)], { type: 'application/geo+json' });
     downloadBlob(blob, `shadowfinder_bands_${exportStamp()}.geojson`);
@@ -2496,8 +2600,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $('export-ca
 
 const SESSION_VERSION = 1;
 const AUTOSAVE_KEY = 'sf-autosave', EXPORT_PHOTOS_KEY = 'sf-export-photos';
-let autosaveOn = localStorage.getItem(AUTOSAVE_KEY) !== '0';
-let exportPhotos = localStorage.getItem(EXPORT_PHOTOS_KEY) === '1';
+let autosaveOn = prefs.get(AUTOSAVE_KEY) !== '0';
+let exportPhotos = prefs.get(EXPORT_PHOTOS_KEY) === '1';
 let autosaveReady = false, autosaveOwner = false, autosaveTimer = 0, autosaveWarned = false;
 
 const finite = v => typeof v === 'number' && Number.isFinite(v);
@@ -2604,7 +2708,7 @@ function tabFromData(sd) {
 
 // Replaces the shadows with those of a session. images[i]: a File for shadow i, or null.
 function applySession(list, images = [], activeIndex = 0) {
-    tabs.forEach(t => { clearTimeout(t.timer); t.token++; removeExifGps(t); });
+    tabs.forEach(t => { cancelCalc(t); removeExifGps(t); });
     tabs = list.slice(0, MAX_OBS).map(tabFromData);
     if (!tabs.length) tabs = [newTab()];
     active = tabs[Number.isInteger(activeIndex) && tabs[activeIndex] ? activeIndex : 0];
@@ -2769,7 +2873,7 @@ async function autosaveRestore() {
 
 function setAutosave(on) {
     autosaveOn = on;
-    localStorage.setItem(AUTOSAVE_KEY, on ? '1' : '0');
+    prefs.set(AUTOSAVE_KEY, on ? '1' : '0');
     if (on) { autosaveWarned = false; autosaveWrite(); showToast('Autosave on: your work is kept in this browser.', 'success'); }
     else { autosaveClearStore(); showToast('Autosave off: the saved copy was deleted.', 'success'); }
 }
@@ -2778,7 +2882,7 @@ function clearSaved() {
     if (!autosaveOwner) return showToast('ShadowFinder is open in another tab: clear the saved session there.');
     if (!confirm('Delete the saved session and start empty? This cannot be undone.')) return;
     autosaveClearStore().then(() => {
-        tabs.forEach(t => { clearTimeout(t.timer); t.token++; removeExifGps(t); });
+        tabs.forEach(t => { cancelCalc(t); removeExifGps(t); });
         tabs = [newTab()];
         active = tabs[0];
         syncObservations(); renderBands(); loadTabIntoUI();
@@ -2820,7 +2924,7 @@ function renderSessionMenu() {
     entry(`${arrow(false)} Export this shadow`, 'Save the selected shadow: its points or typed values, its time and settings', tabHasWork(active), exportThis);
     entry(`${arrow(false)} Export all`, 'Save every shadow as one file', tabs.some(tabHasWork), exportAll);
     switchRow('Include photos', 'Store each photo inside the exported file, unchanged, with its EXIF and GPS, so an import restores it without asking. The file gets about a third bigger than the photos.',
-        exportPhotos, on => { exportPhotos = on; localStorage.setItem(EXPORT_PHOTOS_KEY, on ? '1' : '0'); renderSessionMenu(); });
+        exportPhotos, on => { exportPhotos = on; prefs.set(EXPORT_PHOTOS_KEY, on ? '1' : '0'); renderSessionMenu(); });
     if (exportPhotos) {
         const n = document.createElement('div');
         n.className = 'session-note';
