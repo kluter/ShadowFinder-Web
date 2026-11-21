@@ -64,6 +64,8 @@ body {
 
 
 /* ---- BUTTONS ---- */
+/* Form controls don't inherit the page font by default (buttons fell back to Arial) */
+button, input, select, textarea { font-family: inherit; }
 button {
     background: #1e1e1e; color: #ccc; border: 1px solid #383838;
     padding: 5px 11px; border-radius: 4px; cursor: pointer;
@@ -123,7 +125,7 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 /* Date/time: six small fields that look and behave like one */
 .dt-wrap { position: relative; }
 .dt-field {
-    display: flex; align-items: center; height: 32px; padding: 0 2px 0 8px;
+    display: flex; align-items: center; height: 30px; padding: 0 2px 0 6px;
     background: #1a1a1a; border: 1px solid #383838; border-radius: 4px;
     font-variant-numeric: tabular-nums; transition: border-color 0.15s;
 }
@@ -132,16 +134,16 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .dt-field.complete:focus-within { border-color: #ffb300; }
 .dt-field.invalid, .dt-field.invalid:focus-within { border-color: #ff5d5d; }
 .dt-seg {
-    width: 2.9ch; padding: 0; margin: 0; text-align: center;
+    width: 2.6ch; padding: 0; margin: 0; text-align: center;
     background: none; border: none; outline: none; border-radius: 2px;
     font: inherit; font-size: 13px; color: #eee; caret-color: #ffb300;
 }
-.dt-seg.dt-seg-y { width: 4.9ch; }
+.dt-seg.dt-seg-y { width: 4.5ch; }
 .dt-seg::placeholder { color: #555; }
 .dt-seg:focus { background: #3a2a00; color: #fff; }
 .dt-seg::selection { background: #7a5500; color: #fff; }
 .dt-sep { color: #555; font-size: 13px; padding: 0 1px; }
-.dt-gap { width: 10px; }
+.dt-gap { width: 7px; }
 .dt-parts { display: flex; align-items: center; }
 /* EXIF chip at the start of the When field */
 .dt-field .exif-wrap { margin-right: 8px; }
@@ -154,9 +156,9 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .exif-chip.edited { background: #1e1e1e; border-color: #444; color: #aaa; font-weight: 600; letter-spacing: 0.2px; }
 .exif-chip.edited:hover:not(:disabled) { background: #2a1e00; border-color: #ffb300; color: #ffb300; }
 /* UTC / Local inside the When field */
-.tz-switch { display: flex; margin-left: 10px; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
+.tz-switch { display: flex; margin-left: 8px; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
 .tz-btn {
-    height: 22px; padding: 0 8px; border: none; border-radius: 0;
+    height: 20px; padding: 0 6px; border: none; border-radius: 0;
     background: #151515; color: #666; font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
 }
 .tz-btn + .tz-btn { border-left: 1px solid #333; }
@@ -192,14 +194,14 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* Height / shadow length: typed, or measured from the three points (read-only, coloured by angle) */
 .hl-field {
-    display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px;
+    display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 7px;
     background: #1a1a1a; border: 1px solid #383838; border-radius: 4px;
     transition: border-color 0.15s, background 0.15s;
 }
 .hl-field:focus-within { border-color: #ffb300; }
 .hl-field label { font-size: 10px; font-weight: 700; color: #888; letter-spacing: 0.4px; }
 .hl-input {
-    width: 52px; height: 24px; padding: 0 4px;
+    width: 46px; height: 22px; padding: 0 3px;
     background: none; border: none; outline: none;
     font: inherit; font-size: 13px; color: #eee; font-variant-numeric: tabular-nums;
 }
@@ -218,12 +220,13 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 .hl-field.q-bad .hl-input { color: #ff9999; }
 
 /* Height / length and their reset sit at the right end of the input bar */
-.hl-group { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.hl-group { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 
 /* "Try the demo" at the right of the photo header */
 .demo-btn {
-    flex-shrink: 0; height: 32px; padding: 0 12px;
-    background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #999; font-size: 12px;
+    flex-shrink: 0; height: 30px; padding: 0 12px;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #999;
+    font-size: 12px; font-weight: 500;
 }
 .demo-btn:hover:not(:disabled) { background: #2a1e00; border-color: #7a5500; color: #ffb300; }
 
@@ -232,13 +235,13 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* Sun readout in the map bar, styled after TracePoint's bearing / tilt readout */
 #sun-readout {
-    display: flex; align-items: stretch; height: 32px;
+    display: flex; align-items: stretch; height: 28px;
     background: #151515; border: 1px solid #333; border-radius: 4px;
     white-space: nowrap; overflow: hidden; flex-shrink: 1; min-width: 0;
 }
 #sun-readout[hidden] { display: none; }
 #sun-readout span {
-    display: flex; align-items: center; gap: 5px; padding: 0 9px;
+    display: flex; align-items: center; gap: 5px; padding: 0 8px;
     border-left: 1px solid #2a2a2a;
 }
 #sun-readout span:first-child { border-left: none; }
@@ -253,14 +256,54 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
     background-size: 600px 600px, cover;
 }
 
+/* ---- PHOTO TOOLS: fit, adjust (card), original ---- */
+.photo-tools { display: flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 1px solid #2a2a2a; }
+.photo-tools[hidden] { display: none; }
+.icon-btn.active-mode { background: #2a1e00; border-color: #7a5500; color: #ffb300; }
+.adjust-wrap { position: relative; }
+.adjust-card {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 1000;
+    width: 270px; padding: 10px 12px 8px;
+    background: #151515; border: 1px solid #2a2a2a; border-radius: 6px;
+    box-shadow: 0 4px 20px #000c;
+}
+.adjust-row { display: grid; grid-template-columns: 70px 1fr 38px; align-items: center; gap: 8px; padding: 4px 0; }
+.adjust-row label { font-size: 11px; color: #999; }
+.adjust-val { font-size: 11px; color: #ffb300; text-align: right; font-variant-numeric: tabular-nums; }
+.adjust-row input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+    background: #3a3a3a; border-radius: 2px; outline: none; cursor: pointer;
+}
+.adjust-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 11px; height: 11px; border-radius: 50%; background: #ffb300; border: none;
+}
+.adjust-row input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: #ffb300; border: none; }
+.adjust-switch {
+    -webkit-appearance: none; appearance: none; justify-self: start;
+    width: 28px; height: 16px; border-radius: 8px; margin: 0;
+    background: #3a3a3a; position: relative; cursor: pointer; transition: background 0.15s;
+}
+.adjust-switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%; background: #bbb; transition: left 0.15s, background 0.15s;
+}
+.adjust-switch:checked { background: #7a5500; }
+.adjust-switch:checked::after { left: 14px; background: #ffb300; }
+.adjust-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 6px; padding-top: 8px; border-top: 1px solid #222;
+    font-size: 10px; color: #666;
+}
+
 /* Small square icon buttons in the bars (reset) */
 .icon-btn {
-    width: 32px; height: 32px; padding: 0;
+    width: 28px; height: 28px; padding: 0;
     display: flex; align-items: center; justify-content: center;
     background: #151515; border: 1px solid #333; border-radius: 4px;
     color: #aaa; box-shadow: 0 2px 6px #0006;
 }
-.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn svg { width: 14px; height: 14px; }
 .icon-btn:hover:not(:disabled) { background: #222; color: #ffb300; }
 
 /* ---- NEXT-STEP HINT: centred at the bottom of the photo (as in TracePoint) ---- */
@@ -615,6 +658,9 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* ---- MAP BAR: coordinate input on the left, display toggles on the right ---- */
 #map-bar { flex-wrap: nowrap; }
+/* compact controls in the map bar */
+#map-bar .toggle-btn, #map-bar .opacity-control, #map-bar .coord-search-input { height: 30px; }
+#sun-readout { height: 30px; }
 .map-bar-end { display: flex; align-items: center; gap: 8px; margin-left: auto; min-width: 0; }
 .map-bar-end > * { flex-shrink: 0; }
 .map-bar-end > #sun-readout { flex-shrink: 1; }

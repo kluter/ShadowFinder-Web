@@ -98,12 +98,12 @@ map.setVerticalFieldOfView(CAMERA_FOV);
 // bearing and tilt, and the needle shows the tilt.
 map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'top-right');
 
-// The zoom at which the whole globe fits the map panel, with ~100 px to spare top and bottom.
+// The zoom at which the whole globe fits the map panel, with ~40 px to spare top and bottom.
 // The globe's radius is 512·2^z / 2π px; seen from the camera (cam px in front of it) its edge
 // appears at cam·tan(asin(R / (cam + R))).
 function globeFitZoom() {
     const H = map.getContainer().clientHeight, W = map.getContainer().clientWidth;
-    const target = Math.max(80, Math.min(H - 200, W - 60) / 2);
+    const target = Math.max(80, Math.min(H - 80, W - 80) / 2);
     const cam = 0.5 * H / Math.tan(CAMERA_FOV / 2 * Math.PI / 180);
     const t = target / cam, k = t / Math.sqrt(1 + t * t);
     const R = k * cam / (1 - k);
@@ -134,7 +134,7 @@ mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoo
     for (let i = 0; i < 260; i++) {
         const x = rnd() * S, y = rnd() * S, big = rnd() < 0.06;
         const r = big ? 0.9 + rnd() * 0.6 : 0.35 + rnd() * 0.45;
-        const a = big ? 0.7 + rnd() * 0.3 : 0.25 + rnd() * 0.45;
+        const a = (big ? 0.7 + rnd() * 0.3 : 0.25 + rnd() * 0.45) * 0.82;
         const tint = rnd();
         g.fillStyle = tint < 0.12 ? `rgba(255,220,170,${a})` : tint < 0.24 ? `rgba(180,200,255,${a})` : `rgba(255,255,255,${a})`;
         g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
@@ -235,6 +235,8 @@ setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 // shadow length, plus the capture time. A tab's band is recalculated whenever its input is
 // complete; `observations` is the list of bands currently on the map.
 
+const ADJUST_DEFAULT = { contrast: 100, brightness: 100, saturation: 100, invert: false };
+
 let tabSeq = 0;
 function newTab() {
     return {
@@ -252,6 +254,7 @@ function newTab() {
         busy: false,
         framed: false,      // the map has already been turned to this tab's band once
         view: null,         // saved photo zoom/pan
+        adjust: { ...ADJUST_DEFAULT },   // display-only contrast / brightness / saturation / invert
         timer: 0, token: 0,
     };
 }
@@ -356,6 +359,9 @@ function loadTabIntoUI() {
         overlay.style.display = '';
     }
     canvas.style.cursor = idleCursor();
+    showOriginal = false;
+    $('adjust-card').style.display = 'none';
+    syncPhotoTools();
     drawCanvas();
     SEGS.forEach(s => { segEl[s].value = t.dt[s]; });
     syncDtValidity();
@@ -392,6 +398,7 @@ function loadImage(file, tab = active, onReady = null) {
             tab.fileName = file.name || '';
             tab.points.length = 0;
             tab.view = null;
+            tab.adjust = { ...ADJUST_DEFAULT };
             tab.result = null; tab.noMatch = false; tab.framed = false;
             syncObservations();
             renderBands();
@@ -442,12 +449,70 @@ function drawCanvas() {
     ctx.save();
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
+    const f = photoFilter();
+    if (f) ctx.filter = f;
     ctx.drawImage(img, 0, 0);
     ctx.restore();
     drawPoints();
     if (points.length >= 2) drawLine(points[0], points[1], POINT_COLORS[0]);
     if (points.length === 3) drawLine(points[0], points[2], POINT_COLORS[2]);
 }
+
+// ---- PHOTO TOOLS: fit, display adjustments, show original (as in TracePoint) ----
+
+let showOriginal = false;
+const isAdjusted = a => a.contrast !== 100 || a.brightness !== 100 || a.saturation !== 100 || a.invert;
+
+function photoFilter() {
+    const a = active.adjust;
+    if (showOriginal || !isAdjusted(a)) return '';
+    return `contrast(${a.contrast}%) brightness(${a.brightness}%) saturate(${a.saturation}%)${a.invert ? ' invert(1)' : ''}`;
+}
+
+function syncPhotoTools() {
+    const a = active.adjust;
+    $('photo-tools').hidden = !active.img;
+    ['contrast', 'brightness', 'saturation'].forEach(k => {
+        $(`adjust-${k}`).value = a[k];
+        $(`adjust-${k}-val`).textContent = a[k] + '%';
+    });
+    $('adjust-invert').checked = a.invert;
+    $('adjust-invert-val').textContent = a.invert ? 'On' : 'Off';
+    const adjusted = isAdjusted(a);
+    if (!adjusted) showOriginal = false;
+    $('btn-original').disabled = !adjusted;
+    $('btn-original').classList.toggle('active-mode', showOriginal);
+    $('btn-original').setAttribute('aria-pressed', String(showOriginal));
+    $('btn-adjust').classList.toggle('active-mode', adjusted);
+}
+
+$('btn-fit').addEventListener('click', () => { if (!img) return; fitImage(); drawCanvas(); });
+
+['contrast', 'brightness', 'saturation'].forEach(k => $(`adjust-${k}`).addEventListener('input', e => {
+    active.adjust[k] = +e.target.value;
+    showOriginal = false;
+    syncPhotoTools(); drawCanvas();
+}));
+$('adjust-invert').addEventListener('change', e => {
+    active.adjust.invert = e.target.checked;
+    showOriginal = false;
+    syncPhotoTools(); drawCanvas();
+});
+$('btn-adjust-reset').addEventListener('click', () => {
+    active.adjust = { ...ADJUST_DEFAULT };
+    syncPhotoTools(); drawCanvas();
+});
+$('btn-original').addEventListener('click', () => {
+    showOriginal = !showOriginal;
+    syncPhotoTools(); drawCanvas();
+});
+$('btn-adjust').addEventListener('click', e => {
+    e.stopPropagation();
+    const card = $('adjust-card');
+    card.style.display = card.style.display === 'none' ? 'block' : 'none';
+});
+document.addEventListener('click', e => { if (!$('adjust-wrap').contains(e.target)) $('adjust-card').style.display = 'none'; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('adjust-card').style.display = 'none'; });
 
 function drawPoints() {
     points.forEach((p, i) => {
@@ -1712,41 +1777,19 @@ function parseCoordinateUrl(s) {
 }
 
 // ---- SUN READOUT (map bar) ----
-// For the selected shadow: the sun's altitude (from H/L), the ring's radius (90° minus that: how
-// far from the overhead point the band lies) and, for a UTC time, where the sun stood overhead,
-// which is the ring's centre.
-
-// The point where the sun is at the zenith, from the sun's declination and right ascension and
-// Greenwich sidereal time (low-precision almanac formulas, good to ~0.01°).
-function subsolarPoint(ms) {
-    const d = ms / 86400000 + 2440587.5 - 2451545.0;   // days since J2000.0
-    const g = (357.529 + 0.98560028 * d) / RAD;
-    const q = 280.459 + 0.98564736 * d;
-    const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) / RAD;
-    const e = (23.439 - 0.00000036 * d) / RAD;
-    const ra  = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) * RAD;
-    const dec = Math.asin(Math.sin(e) * Math.sin(L)) * RAD;
-    const gmst = 18.697374558 + 24.06570982441908 * d;   // hours
-    const lng = ((ra - gmst * 15) % 360 + 540) % 360 - 180;
-    return { lat: dec, lng };
-}
-
-const fmtLatLng = ({ lat, lng }) =>
-    `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lng).toFixed(1)}°${lng >= 0 ? 'E' : 'W'}`;
+// For the selected shadow: how high the sun stood (from the height / shadow ratio) and the ring's
+// radius, the distance from the point where the sun was straight overhead to the band.
 
 function updateSunReadout() {
     const el = $('sun-readout');
     const r = active.result;
     if (!r) { el.hidden = true; return; }
     const alt = Math.atan2(r.h, r.s) * RAD;
-    const radius = 90 - alt;
+    const radiusKm = Math.round((90 - alt) * 111.2 / 10) * 10;   // 1° of arc ≈ 111.2 km
     const parts = [
-        ['Sun', `${alt.toFixed(1)}°`, 'Sun altitude above the horizon, from the height / shadow ratio'],
-        ['Ring', `${radius.toFixed(1)}° · ${Math.round(radius * 111.2).toLocaleString('en')} km`, 'Distance of the band from the point where the sun stood overhead'],
+        ['Sun elevation', `${alt.toFixed(1)}°`, 'How high the sun stood above the horizon, from the height / shadow ratio'],
+        ['Ring radius', `${radiusKm.toLocaleString('en')} km`, 'Distance from the point where the sun stood straight overhead to the band'],
     ];
-    if (r.mode === 'utc') {
-        parts.push(['Overhead', fmtLatLng(subsolarPoint(r.baseEpochMs)), 'Where the sun stood overhead at that moment: the centre of the ring']);
-    }
     el.innerHTML = parts.map(([k, v, t]) => `<span title="${t}"><i>${k}</i><b>${v}</b></span>`).join('');
     el.hidden = false;
 }
