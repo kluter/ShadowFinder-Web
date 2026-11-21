@@ -82,19 +82,76 @@ const map = new maplibregl.Map({
         layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#111' } }],
     },
     center: [0, 20],
-    zoom: 1.6,
+    zoom: 1.4,
     attributionControl: { compact: true },
 });
+// Resolves once the style is ready for sources and layers to be added.
+const mapReady = new Promise(resolve => map.once('load', resolve));
+// A narrow camera lens. MapLibre's default (≈37°) is a close-up perspective that shows only
+// about 80° around the centre of the globe, so a sun-ring (radius 90° minus the sun's altitude)
+// ends up squeezed against the edge. At 10° the view is nearly orthographic: almost the whole
+// hemisphere is visible and the ring keeps its shape.
+const CAMERA_FOV = 10;
+map.setVerticalFieldOfView(CAMERA_FOV);
+
 // Compass only (zoom is scroll / pinch). With visualizePitch, clicking it resets both
 // bearing and tilt, and the needle shows the tilt.
 map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'top-right');
 
-function setProjection(type) {
+// The zoom at which the whole globe fits the map panel, with ~100 px to spare top and bottom.
+// The globe's radius is 512·2^z / 2π px; seen from the camera (cam px in front of it) its edge
+// appears at cam·tan(asin(R / (cam + R))).
+function globeFitZoom() {
+    const H = map.getContainer().clientHeight, W = map.getContainer().clientWidth;
+    const target = Math.max(80, Math.min(H - 200, W - 60) / 2);
+    const cam = 0.5 * H / Math.tan(CAMERA_FOV / 2 * Math.PI / 180);
+    const t = target / cam, k = t / Math.sqrt(1 + t * t);
+    const R = k * cam / (1 - k);
+    return Math.log2(2 * Math.PI * R / 512);
+}
+const frameZoom = () => projection === 'globe' ? globeFitZoom() : 1.2;
+
+async function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
-    map.setProjection({ type: projection });
     localStorage.setItem('sf-projection', projection);
     syncProjectionToggle();
+    $('map-container').classList.toggle('space', projection === 'globe');
+    await mapReady;
+    map.setProjection({ type: projection });
+    // Switching to the globe shows it whole, upright, around the current longitude.
+    if (projection === 'globe') map.easeTo({ center: [map.getCenter().lng, Math.max(-30, Math.min(30, map.getCenter().lat))], zoom: globeFitZoom(), bearing: 0, pitch: 0 });
 }
+$('map-container').classList.toggle('space', projection === 'globe');
+mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoom() }); });
+
+// A starfield tile for the space behind the globe: seeded, so it is the same on every load.
+(() => {
+    const S = 600, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    let seed = 20240414;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let i = 0; i < 260; i++) {
+        const x = rnd() * S, y = rnd() * S, big = rnd() < 0.06;
+        const r = big ? 0.9 + rnd() * 0.6 : 0.35 + rnd() * 0.45;
+        const a = big ? 0.7 + rnd() * 0.3 : 0.25 + rnd() * 0.45;
+        const tint = rnd();
+        g.fillStyle = tint < 0.12 ? `rgba(255,220,170,${a})` : tint < 0.24 ? `rgba(180,200,255,${a})` : `rgba(255,255,255,${a})`;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    }
+    $('map-container').style.setProperty('--stars', `url(${c.toDataURL()})`);
+})();
+
+// Compass: north up and no tilt; on the globe it also brings the equator back to the centre.
+mapReady.then(() => {
+    const btn = map.getContainer().querySelector('.maplibregl-ctrl-compass');
+    btn?.addEventListener('click', e => {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const c = map.getCenter();
+        map.easeTo({ bearing: 0, pitch: 0, center: projection === 'globe' ? [c.lng, 0] : c });
+    }, true);
+});
 function syncProjectionToggle() {
     document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
         b.classList.toggle('active-toggle', b.dataset.projection === projection));
@@ -103,8 +160,6 @@ document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
     b.addEventListener('click', () => setProjection(b.dataset.projection)));
 syncProjectionToggle();
 
-// Resolves once the style is ready for sources and layers to be added.
-const mapReady = new Promise(resolve => map.once('load', resolve));
 
 const TILE_SETS = [
     {
@@ -355,7 +410,11 @@ function loadImage(file, tab = active, onReady = null) {
 
     Promise.all([imageLoaded, exifRead]).then(() => {
         if (applyExifDateTime(tab, { quiet: !!onReady })) onInputChanged(tab);
-        if (tab === active) { syncExifChip(); updateGuide(); }
+        if (tab === active) {
+            syncExifChip(); updateGuide();
+            // Flow: the time comes first; without an EXIF time, the field is where to go next.
+            if (dtEpoch(tab) == null) focusFirstEmptySeg();
+        }
         if (onReady) onReady(tab);
     }).catch(() => {});
 }
@@ -445,15 +504,27 @@ function idleCursor(cx, cy) {
     return points.length < 3 ? 'crosshair' : 'default';
 }
 
+// Left button: on a point it drags the point; elsewhere a press that moves more than a few
+// pixels pans the photo, and one that doesn't is a click that places the next point.
+let pendingPan = null;
 canvas.addEventListener('mousedown', e => {
     if (e.button !== 0 || spaceHeld || !img) return;
     const { x, y } = canvasXY(e);
     const i = pointAt(x, y);
-    if (i < 0) return;
+    if (i < 0) { pendingPan = { x: e.clientX, y: e.clientY, ox: offsetX, oy: offsetY }; return; }
     e.preventDefault();
     dragIdx = i;
     canvas.style.cursor = 'grabbing';
 });
+window.addEventListener('mousemove', e => {
+    if (!pendingPan || isPanning) return;
+    if (Math.hypot(e.clientX - pendingPan.x, e.clientY - pendingPan.y) <= 4) return;
+    isPanning = true;
+    panStartX = pendingPan.x; panStartY = pendingPan.y;
+    panOffsetX = pendingPan.ox; panOffsetY = pendingPan.oy;
+    canvas.style.cursor = 'grabbing';
+});
+window.addEventListener('mouseup', () => { pendingPan = null; });
 canvas.addEventListener('mousemove', e => {
     if (dragIdx >= 0 || isPanning) return;
     const { x, y } = canvasXY(e);
@@ -1105,37 +1176,7 @@ $('btn-exif').addEventListener('click', e => {
     });
 })();
 
-// ---- MENU (left side; session save/load arrives here next) ----
-
-function menuItems() {
-    return [
-        { label: 'Try the demo', hint: 'A photo with its points set and its EXIF time', run: loadDemo },
-    ];
-}
-
-function renderMenu() {
-    const menu = $('app-menu');
-    menu.innerHTML = '';
-    menuItems().forEach(it => {
-        if (it.sep) { const s = document.createElement('div'); s.className = 'session-sep'; menu.appendChild(s); return; }
-        const el = document.createElement('div');
-        el.className = 'session-item' + (it.disabled ? ' disabled' : '') + (it.danger ? ' danger' : '');
-        el.setAttribute('role', 'menuitem');
-        el.textContent = it.label;
-        if (it.hint) el.title = it.hint;
-        if (!it.disabled) el.addEventListener('click', () => { openMenu(false); it.run(); });
-        menu.appendChild(el);
-    });
-}
-
-function openMenu(show) {
-    if (show) renderMenu();
-    $('app-menu').style.display = show ? 'block' : 'none';
-    $('btn-menu').setAttribute('aria-expanded', String(show));
-}
-$('btn-menu').addEventListener('click', e => { e.stopPropagation(); openMenu($('app-menu').style.display === 'none'); });
-document.addEventListener('click', e => { if (!$('menu-wrap').contains(e.target)) openMenu(false); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') openMenu(false); });
+// ---- RESET: the measurement (points / typed H·L) and, separately, the time ----
 
 function resetMeasurement() {
     const t = active;
@@ -1153,62 +1194,68 @@ function resetMeasurement() {
 }
 $('btn-reset').addEventListener('click', resetMeasurement);
 
+// Clears the time (the EXIF chip, if any, then reads "edited ↺" and restores it).
+function resetTime() {
+    const t = active;
+    SEGS.forEach(s => setSeg(s, ''));
+    t.result = null; t.noMatch = false; t.framed = false;
+    clearTimeout(t.timer); t.token++;
+    syncObservations();
+    renderBands();
+    onDtChanged();
+    renderTabs();
+    focusSeg('y');
+}
+$('btn-reset-time').addEventListener('click', resetTime);
+function syncResetTime() { $('btn-reset-time').disabled = !SEGS.some(s => active.dt[s] !== ''); }
+
 // ---- DEMO ----
-// The demo photo with its points on the teal box and its shadow (which runs sideways across the
-// frame, so the length is reliable); its EXIF supplies the capture time.
-const DEMO = {
-    file: 'DEMO_20240414_134449138.jpg',
-    points: [{ x: 653, y: 623 }, { x: 653, y: 535 }, { x: 768, y: 624 }],
-};
+// A demo photo whose EXIF carries the capture time; the points are for the user to set (the
+// teal box and its shadow, which runs sideways across the frame, work best).
+const DEMO_FILE = 'DEMO_20240414_134449138.jpg';
 
 function loadDemo() {
-    fetch('assets/' + DEMO.file)
+    fetch('assets/' + DEMO_FILE)
         .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
         .then(blob => {
             // into this shadow if it is empty, else a new one (or this one at the cap)
             const empty = !active.img && !getMeasurements(active);
             if (!empty && tabs.length < MAX_OBS) { const t = newTab(); tabs.push(t); switchTab(t); }
-            loadImage(new File([blob], DEMO.file, { type: 'image/jpeg' }), active, tab => {
-                tab.points.splice(0, tab.points.length, ...DEMO.points.map(p => ({ ...p })));
-                if (tab === active) { drawCanvas(); canvas.style.cursor = idleCursor(); }
-                onInputChanged(tab, { delay: 0 });
-                showToast('Demo loaded: the points sit on the teal box and its shadow, the time comes from the EXIF. Drag a point and watch the band follow.', 'success');
+            loadImage(new File([blob], DEMO_FILE, { type: 'image/jpeg' }), active, () => {
+                showToast('Demo loaded, with the time from its EXIF. Mark the teal box: its base, its top, then the tip of its shadow.', 'success');
             });
         })
         .catch(() => showToast('Could not load the demo image.'));
 }
 $('btn-demo-link').addEventListener('click', loadDemo);
+$('btn-demo').addEventListener('click', loadDemo);
 
 // ---- STEP GUIDE ----
 // The steps as icons down the right edge of the photo, the current one lit; the bottom hint
 // says what to do next (as in TracePoint).
 
 const GUIDE_STEPS = [
-    { title: 'Add a photo, or type H and L', icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>' },
-    { title: 'Click the base of the object', icon: '<path d="M12 4v12"/><path d="M5 21h14"/><circle cx="12" cy="18" r="2.4" fill="currentColor"/>' },
-    { title: 'Click the top of the object',  icon: '<path d="M12 8v12"/><path d="M5 21h14"/><circle cx="12" cy="5.5" r="2.4" fill="currentColor"/>' },
-    { title: 'Click the tip of the shadow',  icon: '<path d="M6 4v15"/><path d="M6 19h10" stroke-dasharray="2.2 2.2"/><circle cx="18.5" cy="19" r="2.4" fill="currentColor"/>' },
-    { title: 'Check the capture time',       icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
-    { title: 'The band on the map',          icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>' },
+    { title: 'Add a photo, or type H and L',            icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>' },
+    { title: 'Set the capture time',                    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
+    { title: 'Mark base, top and tip of the shadow',    icon: '<path d="M7 3v15"/><path d="M7 18h11" stroke-dasharray="2.2 2.2"/><circle cx="7" cy="18" r="2.2" fill="currentColor"/><circle cx="7" cy="4.5" r="2.2" fill="currentColor"/><circle cx="19" cy="18" r="2.2" fill="currentColor"/>' },
+    { title: 'The band on the map',                     icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>' },
 ];
 
 function guideStatus() {
     const t = active;
     const m = getMeasurements(t);
     if (!t.img && !m) return { idx: 0, hint: 'Drop or paste an image, or browse · no photo? type H and L above' };
-    if (!m) {
-        if (t.points.length < 3) return { idx: 1 + t.points.length, hint: POINT_HINTS[t.points.length] };
-        return { idx: 3, hint: 'The shadow is too short · drag the points apart', cls: 'bad' };
-    }
     if (dtEpoch(t) == null) {
-        return dtFilled(t) ? { idx: 4, hint: 'That date or time does not exist · check it', cls: 'bad' }
-                           : { idx: 4, hint: 'Enter the capture date and time' };
+        return dtFilled(t) ? { idx: 1, hint: 'That date or time does not exist · check it', cls: 'bad' }
+                           : { idx: 1, hint: 'Enter the capture date and time' };
     }
-    if (t.busy || (!t.result && !t.noMatch)) return { idx: 5, hint: 'Calculating…' };
-    if (t.noMatch) return { idx: 5, hint: 'No place on Earth matches · check the points and the time', cls: 'bad' };
-    const alt = Math.atan2(t.result.h, t.result.s) * 180 / Math.PI;
-    const more = tabs.length < MAX_OBS ? ' · + adds the same place at another time' : '';
-    return { idx: GUIDE_STEPS.length, hint: `Band found · sun ${alt.toFixed(1)}° high${more}`, cls: 'done' };
+    if (!m) {
+        if (t.points.length < 3) return { idx: 2, hint: POINT_HINTS[t.points.length] };
+        return { idx: 2, hint: 'The shadow is too short · drag the points apart', cls: 'bad' };
+    }
+    if (t.busy || (!t.result && !t.noMatch)) return { idx: 3, hint: 'Calculating…' };
+    if (t.noMatch) return { idx: 3, hint: 'No place on Earth matches · check the points and the time', cls: 'bad' };
+    return { idx: GUIDE_STEPS.length, hint: m.fromPoints ? 'Drag a point to refine the band' : '', cls: 'done' };
 }
 
 function buildGuide() {
@@ -1229,14 +1276,16 @@ function buildGuide() {
 function guideAction(i) {
     const { idx } = guideStatus();
     if (i === 0 && idx === 0) $('file-picker').click();
-    else if (i === 4 && idx === 4) focusFirstEmptySeg();
-    else if (i === 5 && active.result) {
+    else if (i === 1 && idx === 1) focusFirstEmptySeg();
+    else if (i === 3 && active.result) {
         if (showMode === 'all' && observations.length >= 2 && overlapCount() > 0) frameOverlap();
         else frameBand(active.result.grid);
     }
 }
 
 function updateGuide() {
+    syncResetTime();
+    updateSunReadout();
     const { idx, hint, cls } = guideStatus();
     $('guide').querySelectorAll('.guide-step').forEach((b, i) => {
         b.classList.toggle('done', i < idx);
@@ -1552,7 +1601,7 @@ function frameCells(inside) {
     if (!x && !y && !z) return;
     const lon = Math.atan2(y, x) * 180 / Math.PI;
     const lat = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI;
-    map.flyTo({ center: [lon, lat], zoom: projection === 'globe' ? 1.6 : 1.2, bearing: 0, pitch: 0 });
+    map.flyTo({ center: [lon, lat], zoom: frameZoom(), bearing: 0, pitch: 0 });
 }
 
 function formatObsLabel(baseEpochMs, mode) {
@@ -1660,6 +1709,46 @@ function parseCoordinateUrl(s) {
     }
     if (q.has('lat') && (q.has('lon') || q.has('lng'))) return pair(`${q.get('lat')},${q.get('lon') ?? q.get('lng')}`);
     return undefined;
+}
+
+// ---- SUN READOUT (map bar) ----
+// For the selected shadow: the sun's altitude (from H/L), the ring's radius (90° minus that: how
+// far from the overhead point the band lies) and, for a UTC time, where the sun stood overhead,
+// which is the ring's centre.
+
+// The point where the sun is at the zenith, from the sun's declination and right ascension and
+// Greenwich sidereal time (low-precision almanac formulas, good to ~0.01°).
+function subsolarPoint(ms) {
+    const d = ms / 86400000 + 2440587.5 - 2451545.0;   // days since J2000.0
+    const g = (357.529 + 0.98560028 * d) / RAD;
+    const q = 280.459 + 0.98564736 * d;
+    const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) / RAD;
+    const e = (23.439 - 0.00000036 * d) / RAD;
+    const ra  = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) * RAD;
+    const dec = Math.asin(Math.sin(e) * Math.sin(L)) * RAD;
+    const gmst = 18.697374558 + 24.06570982441908 * d;   // hours
+    const lng = ((ra - gmst * 15) % 360 + 540) % 360 - 180;
+    return { lat: dec, lng };
+}
+
+const fmtLatLng = ({ lat, lng }) =>
+    `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lng).toFixed(1)}°${lng >= 0 ? 'E' : 'W'}`;
+
+function updateSunReadout() {
+    const el = $('sun-readout');
+    const r = active.result;
+    if (!r) { el.hidden = true; return; }
+    const alt = Math.atan2(r.h, r.s) * RAD;
+    const radius = 90 - alt;
+    const parts = [
+        ['Sun', `${alt.toFixed(1)}°`, 'Sun altitude above the horizon, from the height / shadow ratio'],
+        ['Ring', `${radius.toFixed(1)}° · ${Math.round(radius * 111.2).toLocaleString('en')} km`, 'Distance of the band from the point where the sun stood overhead'],
+    ];
+    if (r.mode === 'utc') {
+        parts.push(['Overhead', fmtLatLng(subsolarPoint(r.baseEpochMs)), 'Where the sun stood overhead at that moment: the centre of the ring']);
+    }
+    el.innerHTML = parts.map(([k, v, t]) => `<span title="${t}"><i>${k}</i><b>${v}</b></span>`).join('');
+    el.hidden = false;
 }
 
 let coordPin = null;

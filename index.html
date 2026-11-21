@@ -29,6 +29,7 @@
                 </div>
                 <!-- One tab per observation; "+" adds one (renderTabs in script.js) -->
                 <div class="obs-tabs" id="obs-tabs" role="tablist" aria-label="Observations"></div>
+                <button type="button" class="demo-btn" id="btn-demo" title="Load a demo photo with its EXIF time, then mark its shadow">Try the demo</button>
             </div>
 
             <!-- Input bar: when (with the photo's EXIF time built in), then how long the shadow is -->
@@ -63,25 +64,21 @@
                     </div>
                     <div class="cal-pop" id="cal-pop" style="display:none" role="dialog" aria-label="Pick a day"></div>
                 </div>
-                <div class="hl-field" id="hl-field" title="Object height and shadow length: measured from the 3 points, or typed. Only the ratio matters, so any unit works.">
-                    <label for="input-h">H</label>
-                    <input id="input-h" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="height">
-                    <label for="input-l">L</label>
-                    <input id="input-l" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="shadow">
-                    <span id="measure-angle" class="measure-angle" hidden></span>
-                </div>
-                <button type="button" class="icon-btn" id="btn-reset" title="Reset the points (or the typed height and length) to measure again" aria-label="Reset measurement" disabled>
+                <button type="button" class="icon-btn" id="btn-reset-time" title="Clear the date and time" aria-label="Clear the date and time" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 3 3 9 9 9"/></svg>
                 </button>
-                <div class="menu-wrap" id="menu-wrap">
-                    <button class="session-burger" id="btn-menu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                            <rect y="2"  width="16" height="2" rx="1"/>
-                            <rect y="7"  width="16" height="2" rx="1"/>
-                            <rect y="12" width="16" height="2" rx="1"/>
-                        </svg>
+                <!-- Height and shadow length, with their reset, on the right -->
+                <div class="hl-group">
+                    <div class="hl-field" id="hl-field" title="Object height and shadow length: measured from the 3 points, or typed. Only the ratio matters, so any unit works.">
+                        <label for="input-h">H</label>
+                        <input id="input-h" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="height">
+                        <label for="input-l">L</label>
+                        <input id="input-l" class="hl-input" inputmode="decimal" autocomplete="off" placeholder="shadow">
+                        <span id="measure-angle" class="measure-angle" hidden></span>
+                    </div>
+                    <button type="button" class="icon-btn" id="btn-reset" title="Reset the points (or the typed height and length) to measure again" aria-label="Reset measurement" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 3 3 9 9 9"/></svg>
                     </button>
-                    <div class="session-menu" id="app-menu" style="display:none" role="menu"></div>
                 </div>
             </div>
 
@@ -99,7 +96,6 @@
                 <div id="guide"></div>
                 <div id="zoom-hint">
                     <span class="step-hint" id="image-hint"></span>
-                    <span class="hint-pill">scroll to zoom · space+drag to pan</span>
                 </div>
             </div>
         </div>
@@ -113,6 +109,10 @@
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,4.5 6,8 9.5,4.5"/></svg>
                     </button>
                     <div class="layer-menu basemap-menu" id="basemap-menu" style="display:none"></div>
+                </div>
+                <div class="toggle-wrap" id="projection-toggle" role="group" aria-label="Map projection">
+                    <button type="button" id="btn-globe" class="toggle-btn" data-projection="globe" title="Show the map as a globe">Globe</button>
+                    <button type="button" id="btn-flat" class="toggle-btn" data-projection="mercator" title="Show the map flat (Web Mercator)">2D</button>
                 </div>
                 <div class="header-actions">
                     <a id="btn-github" href="https://github.com/kluter/ShadowFinder-Web" target="_blank" rel="noopener" title="View on GitHub">
@@ -131,17 +131,15 @@
                            title="Decimal (52.39, 13.06), degrees-minutes-seconds, or a map link. Press Enter to pin it. Ctrl+V anywhere on the page works too.">
                 </div>
                 <div class="map-bar-end">
+                    <!-- The selected shadow's sun, like TracePoint's bearing/tilt readout -->
+                    <div id="sun-readout" hidden></div>
                     <div class="toggle-wrap" id="show-toggle" role="group" aria-label="Bands on the map" hidden>
-                        <button type="button" class="toggle-btn" data-show="one" title="Show only the band of the selected shadow">This</button>
-                        <button type="button" class="toggle-btn" data-show="all" title="Show every band; their overlap is the location">All</button>
+                        <button type="button" class="toggle-btn" data-show="one" title="Show only the band of the selected shadow">Selected</button>
+                        <button type="button" class="toggle-btn" data-show="all" title="Show every band; where they overlap is the location">Overlap</button>
                     </div>
                     <div class="opacity-control" id="opacity-wrap" title="Band opacity" style="display:none">
                         <span class="opacity-ico">◐</span>
                         <input type="range" id="opacity-slider" min="0.15" max="1" step="0.05" value="0.85" aria-label="Band opacity">
-                    </div>
-                    <div class="toggle-wrap" id="projection-toggle" role="group" aria-label="Map projection">
-                        <button type="button" id="btn-globe" class="toggle-btn" data-projection="globe" title="Show the map as a globe">Globe</button>
-                        <button type="button" id="btn-flat" class="toggle-btn" data-projection="mercator" title="Show the map flat (Web Mercator)">2D</button>
                     </div>
                 </div>
             </div>
