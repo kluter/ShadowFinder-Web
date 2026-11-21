@@ -86,7 +86,7 @@ The band is **every place the shadow could fall**, a search space, not a pin.
 
 Checked against the [Original](https://github.com/bellingcat/ShadowFinder): `height 10`, `shadow 8`, `2024-02-29 12:00 UTC` reproduces the ring from its README.
 
-The one deliberate difference is the projection: the original is a static equirectangular plot, while `ShadowFinder Web` uses an interactive **Web Mercator** map you can zoom into. Same band, same data, just curved more toward the poles. A flat layout would mean dropping Leaflet's tiles, which are Web Mercator only.
+The one deliberate difference is the projection: the original is a static equirectangular plot, while `ShadowFinder Web` draws the band on an interactive **globe** you can spin and zoom into. Same band, same data, shown in its true shape: a flat map stretches bands near the poles and cuts them at the date line, a globe does neither.
 
 For the full method and worked examples, see [Bellingcat's article](https://www.bellingcat.com/resources/2024/08/22/shadow-geolocate-geolocation-locate-image-tool-open-source-bellingcat-measure/).
 
@@ -137,15 +137,16 @@ npx serve .
 
 Your photo never leaves your browser. It is drawn into a canvas and its EXIF is read in memory, no upload, no server. Confirm it yourself: open DevTools (`F12`) → Network, load an image, and no request carries it. Any EXIF text is escaped before it is shown, so a crafted file cannot inject anything.
 
-The only outbound requests are map tiles (OpenStreetMap, Esri) and the Leaflet library. The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
+Everything the app runs is served from its own folder; the only outbound requests are map tiles (OpenStreetMap, Esri). The only thing stored is your chosen map layer, in `localStorage` (`sf-tileset`), no image data, no coordinates.
 
 ```javascript
 // Every network request ShadowFinder Web makes:
-// GET unpkg.com/leaflet@1.9.4/...   (the map library, once)
-// GET .../tile/{z}/{x}/{y}          (map tiles)
+// GET .../tile/{z}/{x}/{y}          (map tiles: server.arcgisonline.com, tile.openstreetmap.org)
 // GET timezone_grid.json            (local file, Local mode only)
-// No image, no coordinates, nothing else.
+// No CDN, no image, no coordinates, nothing else.
 ```
+
+A **Content-Security-Policy** in `index.html` enforces this in the browser: scripts, styles and workers may only come from the app's own origin, and images and network requests only from there and the two tile servers. No inline scripts, no `eval`.
 
 ### Code and dependencies
 
@@ -153,18 +154,18 @@ The only outbound requests are map tiles (OpenStreetMap, Esri) and the Leaflet l
 
 | Library | Loaded from | Touches your data? |
 |---|---|---|
-| [Leaflet](https://leafletjs.com/) | CDN (unpkg) | No, renders map tiles only |
+| [MapLibre GL JS](https://maplibre.org/) 6.19.0 | bundled in `vendor/maplibre-gl/` | No, renders the globe and map tiles only |
 | [SunCalc](https://github.com/mourner/suncalc) | bundled in `js/` | Locally only, no network |
 | [exifr](https://github.com/MikeKovarik/exifr) | bundled in `js/` | Locally only, no network |
 
-Only Leaflet comes from a CDN; swap it for a local copy to run fully offline.
+Nothing loads from a CDN, so the app works offline apart from the basemap tiles.
 
 It was built with AI assistance, disclosed on purpose because the [risks of opaque, AI-generated OSINT tools](https://www.dutchosintguy.com/post/vibe-coding-is-becoming-an-osint-risk) are real. The fix is not to hide it, but to keep the code readable so anyone can verify it.
 
 ### Security caveats
 
 - **Map tiles reveal the area you view.** Tile requests encode the map coordinates, so a tile server can infer where you are looking. Use a VPN if that matters.
-- **One CDN dependency.** Leaflet loads from unpkg. A compromised CDN could in theory serve malicious code, but this is highly unlikely; self-host Leaflet to rule it out entirely.
+- **The map worker is outside the page's CSP.** MapLibre fetches tiles from a Web Worker, and a `<meta>` CSP does not reach workers. The worker is bundled code that only requests the tile URLs listed in `js/script.js`; to enforce it in the browser too, serve the site with the same policy as an HTTP `Content-Security-Policy` header.
 - **Browser and OS trust.** If your browser or system is compromised, no web app can protect you.
 
 ---

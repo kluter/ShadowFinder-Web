@@ -77,58 +77,85 @@ let isPanning = false, panStartX = 0, panStartY = 0, panOffsetX = 0, panOffsetY 
 
 // ---- MAP ----
 
-const map = L.map('map-container', { center: [20, 0], zoom: 2, zoomControl: true, attributionControl: true });
+// MapLibre GL (bundled in vendor/, exposed by js/maplibre-global.js) on a globe: the band is
+// planet-scale, and a globe shows its true shape where flat Web Mercator stretches it.
+const map = new maplibregl.Map({
+    container: 'map-container',
+    style: {
+        version: 8,
+        projection: { type: 'globe' },
+        sources: {},
+        layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#111' } }],
+    },
+    center: [0, 20],
+    zoom: 1.6,
+    attributionControl: { compact: true },
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-left');
+
+// Resolves once the style is ready for sources and layers to be added.
+const mapReady = new Promise(resolve => map.once('load', resolve));
 
 const TILE_SETS = [
     {
         id: 'dark',
-        label: '🌑 Dark',
+        label: 'Dark',
         layers: [
-            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', opts: { attribution: 'Tiles © Esri', maxZoom: 19, maxNativeZoom: 16 } },
-            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', opts: { attribution: '', maxZoom: 19, maxNativeZoom: 16 } }
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles © Esri', maxzoom: 16 },
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', maxzoom: 16 }
         ]
     },
     {
         id: 'osm',
-        label: '🗺 OpenStreetMap',
-        layers: [{ url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', opts: { attribution: '© OpenStreetMap contributors', maxZoom: 19 } }]
+        label: 'OpenStreetMap',
+        layers: [{ url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors', maxzoom: 19 }]
     },
     {
         id: 'esri-sat',
-        label: '🛰 Satellite',
+        label: 'Satellite',
         layers: [
-            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', opts: { attribution: 'Tiles © Esri', maxZoom: 19 } },
-            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', opts: { attribution: '', opacity: 0.7, maxZoom: 19 } }
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles © Esri', maxzoom: 19 },
+            { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', opacity: 0.7, maxzoom: 19 }
         ]
     }
 ];
 
-let activeTileLayers = [];
-function setTileSet(id) {
-    activeTileLayers.forEach(l => map.removeLayer(l));
-    activeTileLayers = [];
+let activeBaseIds = [];
+async function setTileSet(id) {
+    await mapReady;
+    activeBaseIds.forEach(lid => { map.removeLayer(lid); map.removeSource(lid); });
+    activeBaseIds = [];
     const set = TILE_SETS.find(s => s.id === id) || TILE_SETS[0];
-    set.layers.forEach(l => activeTileLayers.push(L.tileLayer(l.url, l.opts).addTo(map)));
+    // Basemap layers go under the band layer when it exists.
+    const beforeId = map.getLayer(BAND_LAYER) ? BAND_LAYER : undefined;
+    set.layers.forEach((l, i) => {
+        const lid = `base-${set.id}-${i}`;
+        map.addSource(lid, { type: 'raster', tiles: [l.url], tileSize: 256, maxzoom: l.maxzoom, attribution: l.attribution || '' });
+        map.addLayer({ id: lid, type: 'raster', source: lid, paint: { 'raster-opacity': l.opacity ?? 1 } }, beforeId);
+        activeBaseIds.push(lid);
+    });
     localStorage.setItem('sf-tileset', id);
 }
 setTileSet(localStorage.getItem('sf-tileset') || 'dark');
 
-const LayerSwitcher = L.Control.extend({
-    options: { position: 'topright' },
-    onAdd() {
-        const wrap = L.DomUtil.create('div', 'layer-switcher-wrap');
-        L.DomEvent.disableClickPropagation(wrap);
-        const btn = L.DomUtil.create('button', 'layer-burger', wrap);
+class LayerSwitcher {
+    onAdd(m) {
+        const wrap = document.createElement('div');
+        wrap.className = 'maplibregl-ctrl layer-switcher-wrap';
+        const btn = document.createElement('button');
+        btn.className = 'layer-burger';
         btn.title = 'Switch map layer';
         btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <rect y="2"  width="16" height="2" rx="1"/>
             <rect y="7"  width="16" height="2" rx="1"/>
             <rect y="12" width="16" height="2" rx="1"/>
         </svg>`;
-        const menu = L.DomUtil.create('div', 'layer-menu', wrap);
+        const menu = document.createElement('div');
+        menu.className = 'layer-menu';
         menu.style.display = 'none';
         TILE_SETS.forEach(set => {
-            const item = L.DomUtil.create('div', 'layer-item', menu);
+            const item = document.createElement('div');
+            item.className = 'layer-item';
             item.textContent = set.label;
             item.dataset.id = set.id;
             item.onclick = () => {
@@ -137,17 +164,20 @@ const LayerSwitcher = L.Control.extend({
                 item.classList.add('active');
                 menu.style.display = 'none';
             };
+            menu.appendChild(item);
         });
         const savedId = localStorage.getItem('sf-tileset') || 'dark';
         menu.querySelector(`[data-id="${savedId}"]`)?.classList.add('active');
         btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
-        map.on('click', () => { menu.style.display = 'none'; });
+        m.on('click', () => { menu.style.display = 'none'; });
+        wrap.append(btn, menu);
+        this._wrap = wrap;
         return wrap;
     }
-});
-new LayerSwitcher().addTo(map);
+    onRemove() { this._wrap.remove(); }
+}
+map.addControl(new LayerSwitcher(), 'top-right');
 
-let heatmapLayer = null;
 let resultOpacity = 0.85;
 let observations = [];   // each: { id, label, baseEpochMs, mode, h, s, grid, dayGrid }
 // Two observations give a fix with a two-point ambiguity; a third resolves it.
@@ -180,7 +210,7 @@ function refreshClearAllBtn() {
 
 function clearMap() {
     observations = [];
-    if (heatmapLayer) { map.removeLayer(heatmapLayer); heatmapLayer = null; }
+    renderBands();
     resetInputPanel();   // full reset: clears the measurement, manual input, image, and disables
     updateObsList();     // Reset / New observation; refreshClearAllBtn (in resetInputPanel) greys this
 }
@@ -348,7 +378,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     document.getElementById('measure-info').style.display = 'none';
     document.getElementById('exif-card').style.display = 'none';
     setStickyToast(null);
-    if (exifGpsMarker) { map.removeLayer(exifGpsMarker); exifGpsMarker = null; }
+    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
     // Reset clears the current measurement only; saved observation bands stay, and the
     // current band (if any) is still the one a re-measure + recalculate will replace.
     setStep(img ? 2 : 1);
@@ -382,7 +412,7 @@ function resetInputPanel() {
     document.getElementById('exif-wrap').style.display = 'none';
     document.getElementById('file-picker').value = '';
     setStickyToast(null);
-    if (exifGpsMarker) { map.removeLayer(exifGpsMarker); exifGpsMarker = null; }
+    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
     setStep(1);
     refreshNewObsBtn();
     refreshClearAllBtn();
@@ -404,7 +434,7 @@ paintOpacitySlider();
 
 document.getElementById('opacity-slider').addEventListener('input', e => {
     resultOpacity = parseFloat(e.target.value);
-    if (heatmapLayer && heatmapLayer._canvas) heatmapLayer._canvas.style.opacity = resultOpacity;
+    if (map.getLayer(BAND_LAYER)) map.setPaintProperty(BAND_LAYER, 'raster-opacity', resultOpacity);
     paintOpacitySlider();
 });
 
@@ -812,15 +842,12 @@ function renderExifCard() {
 }
 
 function goToExifGps(lat, lng) {
-    if (exifGpsMarker) { map.removeLayer(exifGpsMarker); exifGpsMarker = null; }
-    const icon = L.divIcon({
-        className: '',
-        html: '<div class="exif-gps-marker"></div>',
-        iconSize: [20, 20], iconAnchor: [10, 10]
-    });
+    if (exifGpsMarker) { exifGpsMarker.remove(); exifGpsMarker = null; }
+    const el = document.createElement('div');
+    el.className = 'exif-gps-marker';
     const exifCoords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    exifGpsMarker = L.marker([lat, lng], { icon })
-        .bindPopup(
+    const popup = new maplibregl.Popup({ className: 'tp-popup tp-popup-exif', offset: 14, maxWidth: 'none' })
+        .setHTML(
             `<div class="tp-popup-header">EXIF GPS Position</div>` +
             `<div class="tp-popup-body">` +
             `<span>${exifCoords}</span>` +
@@ -828,12 +855,14 @@ function goToExifGps(lat, lng) {
             `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">` +
             `<rect x="5" y="5" width="9" height="9" rx="1"/><path d="M2 11V2h9"/>` +
             `</svg></button>` +
-            `</div>`,
-            { className: 'tp-popup tp-popup-exif' }
-        )
+            `</div>`
+        );
+    exifGpsMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .setPopup(popup)
         .addTo(map);
-    exifGpsMarker.openPopup();
-    map.setView([lat, lng], Math.max(map.getZoom(), 10));
+    map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 10) });
+    map.once('moveend', () => { if (exifGpsMarker && !popup.isOpen()) exifGpsMarker.togglePopup(); });
 }
 
 // Delegated copy handler for popup coordinate buttons
@@ -987,7 +1016,7 @@ async function runAnalysis(baseEpochMs, objectHeight, shadowLength, mode) {
             renderBands();
             updateObsList();
             refreshNewObsBtn();
-            if (!replacing && observations.length === 1) map.fitBounds([[-60, -180], [85, 180]]);
+            if (!replacing && observations.length === 1) frameBand(obs.grid);
             if (observations.length >= 2 && overlapCount() === 0) {
                 showToast('These bands do not overlap. Check the times, and that every shot is the same place.');
             }
@@ -1004,20 +1033,19 @@ async function runAnalysis(baseEpochMs, objectHeight, shadowLength, mode) {
 // ---- SHADOW MATH ----
 
 function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
-    const angRes  = 0.5;
-    const minLat  = -60, maxLat = 85;
-    const minLon  = -180, maxLon = 180;
-
+    // Layout (GRID, MATCH_TOL) is shared with contours.js, which outlines the band.
     const lats = [];
-    for (let lat = minLat; lat < maxLat; lat += angRes) lats.push(lat);
+    for (let i = 0; i < GRID.rows; i++) lats.push(GRID.minLat + i * GRID.res);
     const lons = [];
-    for (let lon = minLon; lon < maxLon; lon += angRes) lons.push(lon);
+    for (let j = 0; j < GRID.cols; j++) lons.push(GRID.minLon + j * GRID.res);
 
     const numLons = lons.length;
     const offsetMap = tzGrid?._offsetMap;
 
-    // grid holds the match `diff` per cell (-1 = no match). One band per observation.
-    const grid = new Float32Array(lats.length * numLons).fill(-1);
+    // grid holds the relative shadow-length error per cell, continuous so the band edge can be
+    // interpolated between cells (Infinity = sun below the horizon). A cell is in the band
+    // when its error is below MATCH_TOL. One grid per observation.
+    const grid = new Float32Array(lats.length * numLons).fill(Infinity);
     // Day/night wash only makes sense for a single UTC instant.
     // In local mode every point is at its own clock time, so skip it.
     const dayGrid = (mode === 'local') ? null : new Uint8Array(lats.length * numLons);
@@ -1045,10 +1073,8 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
             const calcShadow = objectHeight / Math.tan(alt);
             const diff = Math.abs(calcShadow - shadowLength) / shadowLength;
 
-            if (diff < 0.2) {
-                grid[i * numLons + j] = diff;
-                count++;
-            }
+            grid[i * numLons + j] = diff;
+            if (diff < MATCH_TOL) count++;
         }
     }
 
@@ -1057,99 +1083,124 @@ function findShadows(baseEpochMs, objectHeight, shadowLength, mode, tzGrid) {
 
 // ---- RENDER HEATMAP ----
 
-const HeatmapLayer = L.Layer.extend({
-    initialize(observations) {
-        this._obs = observations;
-        // the day/night wash only makes sense for a single UTC observation
-        this._dayGrid = (observations.length === 1 && observations[0].mode !== 'local')
-            ? observations[0].dayGrid : null;
-    },
-    onAdd(map) {
-        this._map = map;
-        this._canvas = document.createElement('canvas');
-        Object.assign(this._canvas.style, { position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '400', opacity: resultOpacity });
-        map.getContainer().appendChild(this._canvas);
-        map.on('move zoom resize', this._scheduleRender, this);
-        this._render();
-    },
-    onRemove(map) {
-        this._canvas.remove();
-        map.off('move zoom resize', this._scheduleRender, this);
-    },
-    _scheduleRender() {
-        if (this._raf) cancelAnimationFrame(this._raf);
-        this._raf = requestAnimationFrame(() => { this._raf = null; this._render(); });
-    },
-    _render() {
-        const map = this._map;
-        const el = map.getContainer();
-        const w = el.clientWidth, h = el.clientHeight;
-        const canvas = this._canvas;
-        canvas.width = w; canvas.height = h;
+// The bands are painted once into an image pinned to the grid's lat/lon box, and MapLibre
+// drapes that image over the globe like any other map layer, so it moves, zooms and wraps
+// with the map. MapLibre stretches an image evenly in Web Mercator between its corners, so
+// the image rows are spaced in Mercator y and each row is filled from the grid row at its
+// latitude.
+const BAND_SOURCE = 'bands';
+const BAND_LAYER  = 'bands';
+const BAND_IMG_W  = 1440;   // 2 px per 0.5° grid column
+const mercY = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+const BAND_MERC_TOP = mercY(GRID.maxLat), BAND_MERC_BOT = mercY(GRID.minLat);
+const BAND_IMG_H  = Math.round((BAND_MERC_TOP - BAND_MERC_BOT) / (2 * Math.PI) * BAND_IMG_W);
 
-        const ctx = canvas.getContext('2d');
-        const img = ctx.createImageData(w, h);
-        const d = img.data;
-        const obs = this._obs;
-        const n = obs.length;
-        const dayGrid = this._dayGrid;
+// Grid row / column for each image row / column (nearest cell, as the old renderer did).
+const BAND_ROW_GI = new Int32Array(BAND_IMG_H);
+for (let py = 0; py < BAND_IMG_H; py++) {
+    const y = BAND_MERC_TOP - (py + 0.5) / BAND_IMG_H * (BAND_MERC_TOP - BAND_MERC_BOT);
+    const lat = Math.atan(Math.sinh(y)) * 180 / Math.PI;
+    BAND_ROW_GI[py] = Math.min(GRID.rows - 1, Math.max(0, Math.floor((lat - GRID.minLat) / GRID.res)));
+}
+const BAND_COL_GJ = new Int32Array(BAND_IMG_W);
+for (let px = 0; px < BAND_IMG_W; px++) {
+    const lon = GRID.minLon + (px + 0.5) / BAND_IMG_W * (GRID.maxLon - GRID.minLon);
+    BAND_COL_GJ[px] = Math.min(GRID.cols - 1, Math.floor((lon - GRID.minLon) / GRID.res));
+}
 
-        const lats = new Float64Array(h);
-        const lons = new Float64Array(w);
-        for (let py = 0; py < h; py++) lats[py] = map.containerPointToLatLng([0, py]).lat;
-        for (let px = 0; px < w; px++) lons[px] = map.containerPointToLatLng([px, 0]).lng;
+// Colours every image pixel from the observations: bright where every band matches (fading
+// with the match error), faint gold where only some do, and a faint daylight wash for a
+// single UTC observation.
+function paintBandImage(obs) {
+    const img = new ImageData(BAND_IMG_W, BAND_IMG_H);
+    const d = img.data;
+    const n = obs.length;
+    // the day/night wash only makes sense for a single UTC observation
+    const dayGrid = (n === 1 && obs[0].mode !== 'local') ? obs[0].dayGrid : null;
 
-        for (let py = 0; py < h; py++) {
-            const gi = (lats[py] + 60) / 0.5 | 0;
-            if (gi < 0 || gi >= 290) continue;
-            const base = gi * 720;
-            for (let px = 0; px < w; px++) {
-                let lon = ((lons[px] % 360) + 360) % 360;
-                if (lon >= 180) lon -= 360;
-                const gj = (lon + 180) / 0.5 | 0;
-                if (gj < 0 || gj >= 720) continue;
-                const idx = base + gj;
+    for (let py = 0; py < BAND_IMG_H; py++) {
+        const base = BAND_ROW_GI[py] * GRID.cols;
+        for (let px = 0; px < BAND_IMG_W; px++) {
+            const idx = base + BAND_COL_GJ[px];
 
-                // how many observations' bands cover this cell?
-                let matchCount = 0, sumDiff = 0;
-                for (let k = 0; k < n; k++) {
-                    const dff = obs[k].grid[idx];
-                    if (dff >= 0) { matchCount++; sumDiff += dff; }
-                }
+            // how many observations' bands cover this cell?
+            let matchCount = 0, sumDiff = 0;
+            for (let k = 0; k < n; k++) {
+                const dff = obs[k].grid[idx];
+                if (dff < MATCH_TOL) { matchCount++; sumDiff += dff; }
+            }
 
-                const i4 = (py * w + px) * 4;
-                if (matchCount === n) {
-                    // overlap of every band (a single band when n === 1): bright
-                    const t = (sumDiff / n) / 0.2;
-                    d[i4]   = 255;
-                    d[i4+1] = (179 * (1 - t)) | 0;
-                    d[i4+2] = 0;
-                    d[i4+3] = (220 * (1 - t)) | 0;
-                } else if (matchCount > 0) {
-                    // covered by some but not all bands: faint gold
-                    d[i4]   = 255;
-                    d[i4+1] = 179;
-                    d[i4+2] = 0;
-                    d[i4+3] = 38;
-                } else if (dayGrid && dayGrid[idx]) {
-                    // faint golden wash over the daylit part of the world
-                    d[i4]   = 255;
-                    d[i4+1] = 179;
-                    d[i4+2] = 0;
-                    d[i4+3] = 18;
-                }
+            const i4 = (py * BAND_IMG_W + px) * 4;
+            if (matchCount === n) {
+                // overlap of every band (a single band when n === 1): bright
+                const t = (sumDiff / n) / MATCH_TOL;
+                d[i4]   = 255;
+                d[i4+1] = (179 * (1 - t)) | 0;
+                d[i4+2] = 0;
+                d[i4+3] = (220 * (1 - t)) | 0;
+            } else if (matchCount > 0) {
+                // covered by some but not all bands: faint gold
+                d[i4]   = 255;
+                d[i4+1] = 179;
+                d[i4+2] = 0;
+                d[i4+3] = 38;
+            } else if (dayGrid && dayGrid[idx]) {
+                // faint golden wash over the daylit part of the world
+                d[i4]   = 255;
+                d[i4+1] = 179;
+                d[i4+2] = 0;
+                d[i4+3] = 18;
             }
         }
-        ctx.putImageData(img, 0, 0);
     }
-});
+    return img;
+}
 
-function renderBands() {
-    if (heatmapLayer) { map.removeLayer(heatmapLayer); heatmapLayer = null; }
-    if (observations.length) {
-        heatmapLayer = new HeatmapLayer(observations).addTo(map);
-    }
+async function renderBands() {
     refreshClearAllBtn();
+    await mapReady;
+    if (!observations.length) {
+        if (map.getLayer(BAND_LAYER)) map.setLayoutProperty(BAND_LAYER, 'visibility', 'none');
+        return;
+    }
+    const image = paintBandImage(observations);
+    const src = map.getSource(BAND_SOURCE);
+    if (src) {
+        src.updateImage({ image });
+    } else {
+        map.addSource(BAND_SOURCE, {
+            type: 'image',
+            coordinates: [
+                [GRID.minLon, GRID.maxLat], [GRID.maxLon, GRID.maxLat],
+                [GRID.maxLon, GRID.minLat], [GRID.minLon, GRID.minLat],
+            ],
+        });
+        map.getSource(BAND_SOURCE).updateImage({ image });
+        map.addLayer({
+            id: BAND_LAYER, type: 'raster', source: BAND_SOURCE,
+            paint: { 'raster-opacity': resultOpacity, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' },
+        });
+    }
+    map.setLayoutProperty(BAND_LAYER, 'visibility', 'visible');
+}
+
+// Turns the globe to face a new band: the centre of its matching cells, averaged as 3D unit
+// vectors so a band across the antimeridian or around a pole still gets a sensible centre.
+function frameBand(grid) {
+    let x = 0, y = 0, z = 0;
+    for (let i = 0; i < GRID.rows; i++) {
+        const lat = (GRID.minLat + i * GRID.res) * Math.PI / 180;
+        const cl = Math.cos(lat), sl = Math.sin(lat);
+        for (let j = 0; j < GRID.cols; j++) {
+            if (!(grid[i * GRID.cols + j] < MATCH_TOL)) continue;
+            const lon = (GRID.minLon + j * GRID.res) * Math.PI / 180;
+            x += cl * Math.cos(lon); y += cl * Math.sin(lon); z += sl;
+        }
+    }
+    if (!x && !y && !z) return;
+    const lon = Math.atan2(y, x) * 180 / Math.PI;
+    const lat = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI;
+    map.flyTo({ center: [lon, lat], zoom: 1.6 });
 }
 
 function formatObsLabel(baseEpochMs, mode) {
@@ -1167,7 +1218,7 @@ function overlapCount() {
     for (let idx = 0; idx < N; idx++) {
         let all = true;
         for (let k = 0; k < observations.length; k++) {
-            if (observations[k].grid[idx] < 0) { all = false; break; }
+            if (!(observations[k].grid[idx] < MATCH_TOL)) { all = false; break; }
         }
         if (all) c++;
     }

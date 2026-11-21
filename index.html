@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Everything runs from this site; the only third-party hosts are the map tile servers.
+         'unsafe-inline' styles are for style="" attributes, not scripts. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org; connect-src 'self' https://server.arcgisonline.com https://tile.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="author" content="Pawel Kluter">
     <title>ShadowFinder Web</title>
@@ -11,8 +14,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
     <meta name="theme-color" content="#0a0a0a">
     <link rel="manifest" href="assets/site.webmanifest">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -159,6 +161,9 @@
     <div id="toast-container" aria-live="polite"></div>
     <script src="js/exifr.min.js"></script>
     <script src="js/suncalc.min.js"></script>
-    <script src="js/script.js"></script>
+    <script src="js/contours.js"></script>
+    <!-- Both deferred, so they run in this order once the page is parsed. -->
+    <script type="module" src="js/maplibre-global.js"></script>
+    <script defer src="js/script.js"></script>
 </body>
 </html>
