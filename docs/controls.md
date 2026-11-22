@@ -57,7 +57,7 @@ Without a photo, type **H** (object height) and **L** (shadow length) in any uni
 |---|---|
 | Base map (header) | Esri Dark Gray Canvas, OpenStreetMap or Esri World Imagery. The bands' colours change with it |
 | **Globe / 2D** | Globe or flat Web Mercator map |
-| Compass | North up and no tilt; on the globe it also brings the equator to the middle |
+| Compass | North up and no tilt. On the globe it returns to the view of a fresh load around the current longitude: the whole globe, tipped a little toward the north |
 | **Let it spin** (top left of the globe) | The Earth turns slowly eastward under the view as you left it (zoom, tilt and latitude stay): one turn in two minutes on the whole globe, slower when zoomed in. Press it again, or move the map, to stop. On a fresh start the globe spins by itself until the first click or key |
 | Day/night shade | Before the first band: day and night right now, updated every minute. After: the selected shadow's capture moment (UTC times only) |
 | Drag / scroll / right-drag | Move / zoom / rotate and tilt |

@@ -87,6 +87,9 @@ const MAX_OBS = 3;
 // (Web Mercator), switched in the map bar and remembered.
 const PROJECTIONS = ['globe', 'mercator'];
 let projection = PROJECTIONS.includes(prefs.get('sf-projection')) ? prefs.get('sf-projection') : 'globe';
+// The latitude a fresh load centres on: the globe tipped a little toward the north, where most
+// land is. The compass returns there.
+const START_LAT = 20;
 
 const map = new maplibregl.Map({
     container: 'map-container',
@@ -96,7 +99,7 @@ const map = new maplibregl.Map({
         sources: {},
         layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#111' } }],
     },
-    center: [0, 20],
+    center: [0, START_LAT],
     zoom: 1.4,
     attributionControl: { compact: true },
 });
@@ -164,14 +167,18 @@ mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoo
     $('map-container').style.setProperty('--stars', `url(${c.toDataURL()})`);
 })();
 
-// Compass: north up and no tilt; on the globe it also brings the equator back to the centre.
+// Compass: north up and no tilt. On the globe it returns to the view of a fresh load, around the
+// current longitude: centred at START_LAT, the whole globe in view.
 mapReady.then(() => {
     const btn = map.getContainer().querySelector('.maplibregl-ctrl-compass');
     btn?.addEventListener('click', e => {
         e.stopImmediatePropagation();
         e.preventDefault();
-        const c = map.getCenter();
-        map.easeTo({ bearing: 0, pitch: 0, center: projection === 'globe' ? [c.lng, 0] : c });
+        if (projection === 'globe') {
+            map.easeTo({ bearing: 0, pitch: 0, center: [map.getCenter().lng, START_LAT], zoom: globeFitZoom(START_LAT) });
+        } else {
+            map.easeTo({ bearing: 0, pitch: 0 });
+        }
     }, true);
 });
 // ---- SPIN ----
