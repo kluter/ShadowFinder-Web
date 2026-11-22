@@ -87,8 +87,7 @@ const MAX_OBS = 3;
 // (Web Mercator), switched in the map bar and remembered.
 const PROJECTIONS = ['globe', 'mercator'];
 let projection = PROJECTIONS.includes(prefs.get('sf-projection')) ? prefs.get('sf-projection') : 'globe';
-// The latitude a fresh load centres on: the globe tipped a little toward the north, where most
-// land is. The compass returns there.
+// The latitude a fresh load centres on: the globe tipped a little toward the north, where most land is.
 const START_LAT = 20;
 
 const map = new maplibregl.Map({
@@ -167,20 +166,6 @@ mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoo
     $('map-container').style.setProperty('--stars', `url(${c.toDataURL()})`);
 })();
 
-// Compass: north up and no tilt. On the globe it returns to the view of a fresh load, around the
-// current longitude: centred at START_LAT, the whole globe in view.
-mapReady.then(() => {
-    const btn = map.getContainer().querySelector('.maplibregl-ctrl-compass');
-    btn?.addEventListener('click', e => {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        if (projection === 'globe') {
-            map.easeTo({ bearing: 0, pitch: 0, center: [map.getCenter().lng, START_LAT], zoom: globeFitZoom(START_LAT) });
-        } else {
-            map.easeTo({ bearing: 0, pitch: 0 });
-        }
-    }, true);
-});
 // ---- SPIN ----
 // The globe turns slowly eastward, as the Earth does: seen from space with north up, the surface
 // drifts from left to right, so the view's centre moves west.
