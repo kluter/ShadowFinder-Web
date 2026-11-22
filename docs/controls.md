@@ -58,6 +58,7 @@ Without a photo, type **H** (object height) and **L** (shadow length) in any uni
 | Base map (header) | Esri Dark Gray Canvas, OpenStreetMap or Esri World Imagery. The bands' colours change with it |
 | **Globe / 2D** | Globe or flat Web Mercator map |
 | Compass | North up and no tilt; on the globe it also brings the equator to the middle |
+| Day/night shade | Before the first band: day and night right now, updated every minute, with the globe slowly turning until the first click or key. After: the selected shadow's capture moment (UTC times only) |
 | Drag / scroll / right-drag | Move / zoom / rotate and tilt |
 | **Paste coordinates…** | Pin a place (formats below). The pin says which bands cover it |
 | Sun readout | Sun elevation from your H / L ratio, and the ring's radius |

@@ -167,6 +167,37 @@ mapReady.then(() => {
         map.easeTo({ bearing: 0, pitch: 0, center: projection === 'globe' ? [c.lng, 0] : c });
     }, true);
 });
+// ---- IDLE SPIN ----
+// While the app is just open and untouched, the globe turns slowly eastward, as the Earth does:
+// seen from space with north up, the surface drifts from left to right, so the view's centre
+// moves west. The first click, key, scroll, paste or drop anywhere stops it for good, so it never
+// fights the user or the map's own flights. Not with a restored session, nor in 2D, nor when the
+// system asks for reduced motion.
+const SPIN_DEG_PER_SEC = 3;   // one turn in two minutes
+const SPIN_STOP_EVENTS = ['pointerdown', 'keydown', 'wheel', 'paste', 'drop'];
+let spinRaf = 0;
+function stopIdleSpin() {
+    cancelAnimationFrame(spinRaf);
+    spinRaf = 0;
+    SPIN_STOP_EVENTS.forEach(t => document.removeEventListener(t, stopIdleSpin, true));
+}
+async function startIdleSpin() {
+    const still = () => projection === 'globe' && !hasWork() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!still()) return;
+    await mapReady;
+    if (!still()) return;
+    SPIN_STOP_EVENTS.forEach(t => document.addEventListener(t, stopIdleSpin, { capture: true, passive: true }));
+    let last = performance.now();
+    const step = now => {
+        const dt = Math.min(0.1, (now - last) / 1000);   // no jump after the tab was in the background
+        last = now;
+        const c = map.getCenter();
+        map.jumpTo({ center: [((c.lng - SPIN_DEG_PER_SEC * dt + 540) % 360) - 180, c.lat] });
+        spinRaf = requestAnimationFrame(step);
+    };
+    spinRaf = requestAnimationFrame(step);
+}
+
 function syncProjectionToggle() {
     document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
         b.classList.toggle('active-toggle', b.dataset.projection === projection));
@@ -1853,12 +1884,14 @@ async function renderBands() {
         showLayer(OVERLAP_LAYER, false);
     }
 
-    // daylight of the selected shadow's moment (only a UTC time is one moment for the whole Earth)
+    // daylight of the selected shadow's moment (only a UTC time is one moment for the whole Earth);
+    // before there is any band, the day and night of this moment, to the minute
     const day = dayObservation();
-    if (day) {
-        if (dayImgFor !== day.baseEpochMs || !map.getLayer(DAY_LAYER)) {
-            setImageLayer(DAY_LAYER, DAY_COORDS, paintDaylightImage(day.baseEpochMs), firstResultLayer(), 'linear');
-            dayImgFor = day.baseEpochMs;
+    const dayMs = day ? day.baseEpochMs : !observations.length ? Math.floor(Date.now() / 60000) * 60000 : null;
+    if (dayMs != null) {
+        if (dayImgFor !== dayMs || !map.getLayer(DAY_LAYER)) {
+            setImageLayer(DAY_LAYER, DAY_COORDS, paintDaylightImage(dayMs), firstResultLayer(), 'linear');
+            dayImgFor = dayMs;
         }
         showLayer(DAY_LAYER, true);
         setOpacity(DAY_LAYER, dayOpacity());
@@ -3022,4 +3055,9 @@ function makeSplitter(handle, box, { cssVar, key, minA = 560, minB = 420, start 
 // ---- START ----
 
 loadTabIntoUI();
-autosaveRestore();
+autosaveRestore().then(startIdleSpin);   // spins only when nothing was restored
+
+// Until the first band, the map shows the day and night of this moment; the terminator moves
+// 0.25° a minute, so a repaint each minute keeps it current (renderBands repaints only then).
+renderBands();
+setInterval(() => { if (!observations.length && !document.hidden) renderBands(); }, 60000);
