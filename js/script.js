@@ -113,18 +113,21 @@ map.setVerticalFieldOfView(CAMERA_FOV);
 // bearing and tilt, and the needle shows the tilt.
 map.addControl(new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), 'top-right');
 
-// The zoom at which the whole globe fits the map panel, with ~40 px to spare top and bottom.
-// The globe's radius is 512·2^z / 2π px; seen from the camera (cam px in front of it) its edge
+// The zoom at which the whole globe fits the map panel, with ~40 px to spare top and bottom, when
+// the view is centred on latitude `lat`. The globe's radius is 512·2^z / (2π·cos lat) px: MapLibre
+// keeps the scale at the centre as on a Mercator map, so the same zoom shows a bigger globe the
+// further the centre is from the equator. Seen from the camera (cam px in front of it) its edge
 // appears at cam·tan(asin(R / (cam + R))).
-function globeFitZoom() {
+function globeFitZoom(lat = map.getCenter().lat) {
     const H = map.getContainer().clientHeight, W = map.getContainer().clientWidth;
     const target = Math.max(80, Math.min(H - 80, W - 80) / 2);
     const cam = 0.5 * H / Math.tan(CAMERA_FOV / 2 * Math.PI / 180);
     const t = target / cam, k = t / Math.sqrt(1 + t * t);
     const R = k * cam / (1 - k);
-    return Math.log2(2 * Math.PI * R / 512);
+    const cosLat = Math.cos(Math.min(89, Math.abs(lat)) * Math.PI / 180);
+    return Math.log2(2 * Math.PI * R * cosLat / 512);
 }
-const frameZoom = () => projection === 'globe' ? globeFitZoom() : 1.2;
+const frameZoom = lat => projection === 'globe' ? globeFitZoom(lat) : 1.2;
 
 async function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
@@ -135,7 +138,10 @@ async function setProjection(type) {
     await mapReady;
     map.setProjection({ type: projection });
     // Switching to the globe shows it whole, upright, around the current longitude.
-    if (projection === 'globe') map.easeTo({ center: [map.getCenter().lng, Math.max(-30, Math.min(30, map.getCenter().lat))], zoom: globeFitZoom(), bearing: 0, pitch: 0 });
+    if (projection === 'globe') {
+        const lat = Math.max(-30, Math.min(30, map.getCenter().lat));
+        map.easeTo({ center: [map.getCenter().lng, lat], zoom: globeFitZoom(lat), bearing: 0, pitch: 0 });
+    }
 }
 $('map-container').classList.toggle('space', projection === 'globe');
 mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoom() }); });
@@ -173,14 +179,17 @@ mapReady.then(() => {
 // drifts from left to right, so the view's centre moves west.
 // - Idle: while the app is just open and untouched. The first click, key, scroll, paste or drop
 //   anywhere stops it. Not with a restored session, nor in 2D, nor with reduced motion.
-// - "Let it spin" button (top left of the globe): whenever you like. It brings the whole globe
-//   into view, then turns it. The button again, or any move of the map that is not the spin
-//   itself (a drag, a zoom, the compass, a flight to a band or a pin), stops it.
-const SPIN_DEG_PER_SEC = 3;   // one turn in two minutes
+// - "Let it spin" button (top left of the globe): whenever you like, from the view as you left it
+//   (zoom, tilt, bearing and latitude stay). The button again, or any move of the map that is not
+//   the spin itself (a drag, a zoom, the compass, a flight to a band or a pin), stops it.
+// The Earth turns about its axis under the camera: the view's centre moves along its latitude.
+// Zoomed in, the turn slows in step with the zoom, so the surface crosses the screen about as fast
+// as on the whole globe instead of racing past.
+const SPIN_DEG_PER_SEC = 3;   // on the whole globe: one turn in two minutes
 const SPIN_STOP_EVENTS = ['pointerdown', 'keydown', 'wheel', 'paste', 'drop'];
-let spinRaf = 0, spinPending = false, spinBtn = null;
+let spinRaf = 0, spinBtn = null;
 
-const isSpinning = () => !!spinRaf || spinPending;
+const isSpinning = () => !!spinRaf;
 function syncSpinButton() {
     if (!spinBtn) return;
     const on = isSpinning();
@@ -197,7 +206,8 @@ function runSpin() {
         const dt = Math.min(0.1, (now - last) / 1000);   // no jump after the tab was in the background
         last = now;
         const c = map.getCenter();
-        map.jumpTo({ center: [((c.lng - SPIN_DEG_PER_SEC * dt + 540) % 360) - 180, c.lat] }, { spin: true });
+        const speed = SPIN_DEG_PER_SEC * Math.min(1, 2 ** (globeFitZoom(c.lat) - map.getZoom()));
+        map.jumpTo({ center: [((c.lng - speed * dt + 540) % 360) - 180, c.lat] }, { spin: true });
         spinRaf = requestAnimationFrame(step);
     };
     spinRaf = requestAnimationFrame(step);
@@ -206,7 +216,6 @@ function runSpin() {
 function stopSpin() {
     cancelAnimationFrame(spinRaf);
     spinRaf = 0;
-    spinPending = false;
     SPIN_STOP_EVENTS.forEach(t => document.removeEventListener(t, onIdleInput, true));
     syncSpinButton();
 }
@@ -220,23 +229,15 @@ async function startIdleSpin() {
     runSpin();
 }
 
-// The button: whole globe upright first, then the spin (unless the user takes over meanwhile)
+// The button: the spin starts from the view as it is
 function startSpin() {
     if (projection !== 'globe') return;
     stopSpin();
-    spinPending = true;
-    syncSpinButton();
-    const c = map.getCenter();
-    map.once('moveend', () => { if (spinPending) { spinPending = false; runSpin(); } });
-    map.easeTo({ center: [c.lng, Math.max(-30, Math.min(30, c.lat))], zoom: globeFitZoom(), bearing: 0, pitch: 0, duration: 800 });
+    runSpin();
 }
 
-// Any move that is not the spin stops it; while the globe is still easing into view, only the
-// user's own moves (they carry an originalEvent) cancel it.
-map.on('movestart', e => {
-    if (e.spin) return;
-    if (spinRaf || (spinPending && e.originalEvent)) stopSpin();
-});
+// Any move that is not the spin itself stops it
+map.on('movestart', e => { if (!e.spin && spinRaf) stopSpin(); });
 
 map.addControl({
     onAdd() {
@@ -2067,7 +2068,7 @@ $('btn-center').addEventListener('click', () => {
     const r = active.result;
     if (!r || r.mode !== 'utc') return;
     const s = subsolarPoint(r.baseEpochMs);
-    map.flyTo({ center: [s.lng, s.lat], zoom: frameZoom(), bearing: 0, pitch: 0 });
+    map.flyTo({ center: [s.lng, s.lat], zoom: frameZoom(s.lat), bearing: 0, pitch: 0 });
 });
 
 // Turns the map to face a new band: the centre of its matching cells, averaged as 3D unit
@@ -2095,7 +2096,7 @@ function frameCells(inside) {
     if (!x && !y && !z) return;
     const lon = Math.atan2(y, x) * 180 / Math.PI;
     const lat = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI;
-    map.flyTo({ center: [lon, lat], zoom: frameZoom(), bearing: 0, pitch: 0 });
+    map.flyTo({ center: [lon, lat], zoom: frameZoom(lat), bearing: 0, pitch: 0 });
 }
 
 function formatObsLabel(baseEpochMs, mode) {
