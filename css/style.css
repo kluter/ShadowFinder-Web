@@ -661,6 +661,13 @@ a.map-ctx-item { text-decoration: none; }
 }
 .maplibregl-ctrl-group button.maplibregl-ctrl-compass:not(:disabled):hover { background-color: var(--accent-bg); }
 .maplibregl-ctrl-top-right .maplibregl-ctrl { margin: 10px 10px 0 0; }
+.maplibregl-ctrl-top-left .maplibregl-ctrl { margin: 10px 0 0 10px; }
+/* "Let it spin" (top left of the globe): lit while the globe turns; only on the globe */
+.sf-spin-btn { display: flex; align-items: center; justify-content: center; color: #aaa; }
+.sf-spin-btn svg { width: 18px; height: 18px; }
+.maplibregl-ctrl-group button.sf-spin-btn:not(:disabled):hover { background-color: var(--accent-bg); color: var(--accent); }
+.maplibregl-ctrl-group button.sf-spin-btn.active { background-color: var(--accent-bg); color: var(--accent); }
+#map-container:not(.space) .sf-spin-ctrl { display: none; }
 .maplibregl-ctrl-attrib.maplibregl-compact { background: #151515cc; color: #888; }
 .maplibregl-ctrl-attrib a { color: #aaa; }
 .maplibregl-canvas:focus { outline: none; }

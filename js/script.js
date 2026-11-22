@@ -128,6 +128,7 @@ const frameZoom = () => projection === 'globe' ? globeFitZoom() : 1.2;
 
 async function setProjection(type) {
     projection = PROJECTIONS.includes(type) ? type : 'globe';
+    if (projection !== 'globe') stopSpin();   // the spin is for the globe (its button hides in 2D)
     prefs.set('sf-projection', projection);
     syncProjectionToggle();
     $('map-container').classList.toggle('space', projection === 'globe');
@@ -167,36 +168,95 @@ mapReady.then(() => {
         map.easeTo({ bearing: 0, pitch: 0, center: projection === 'globe' ? [c.lng, 0] : c });
     }, true);
 });
-// ---- IDLE SPIN ----
-// While the app is just open and untouched, the globe turns slowly eastward, as the Earth does:
-// seen from space with north up, the surface drifts from left to right, so the view's centre
-// moves west. The first click, key, scroll, paste or drop anywhere stops it for good, so it never
-// fights the user or the map's own flights. Not with a restored session, nor in 2D, nor when the
-// system asks for reduced motion.
+// ---- SPIN ----
+// The globe turns slowly eastward, as the Earth does: seen from space with north up, the surface
+// drifts from left to right, so the view's centre moves west.
+// - Idle: while the app is just open and untouched. The first click, key, scroll, paste or drop
+//   anywhere stops it. Not with a restored session, nor in 2D, nor with reduced motion.
+// - "Let it spin" button (top left of the globe): whenever you like. It brings the whole globe
+//   into view, then turns it. The button again, or any move of the map that is not the spin
+//   itself (a drag, a zoom, the compass, a flight to a band or a pin), stops it.
 const SPIN_DEG_PER_SEC = 3;   // one turn in two minutes
 const SPIN_STOP_EVENTS = ['pointerdown', 'keydown', 'wheel', 'paste', 'drop'];
-let spinRaf = 0;
-function stopIdleSpin() {
-    cancelAnimationFrame(spinRaf);
-    spinRaf = 0;
-    SPIN_STOP_EVENTS.forEach(t => document.removeEventListener(t, stopIdleSpin, true));
+let spinRaf = 0, spinPending = false, spinBtn = null;
+
+const isSpinning = () => !!spinRaf || spinPending;
+function syncSpinButton() {
+    if (!spinBtn) return;
+    const on = isSpinning();
+    spinBtn.classList.toggle('active', on);
+    spinBtn.setAttribute('aria-pressed', String(on));
+    spinBtn.title = on ? 'Stop the globe' : 'Let it spin: the globe turns like the Earth';
 }
-async function startIdleSpin() {
-    const still = () => projection === 'globe' && !hasWork() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!still()) return;
-    await mapReady;
-    if (!still()) return;
-    SPIN_STOP_EVENTS.forEach(t => document.addEventListener(t, stopIdleSpin, { capture: true, passive: true }));
+// Idle-spin stop: anything the user does, except pressing the spin button (its click decides)
+function onIdleInput(e) { if (!e.target.closest?.('.sf-spin-btn')) stopSpin(); }
+
+function runSpin() {
     let last = performance.now();
     const step = now => {
         const dt = Math.min(0.1, (now - last) / 1000);   // no jump after the tab was in the background
         last = now;
         const c = map.getCenter();
-        map.jumpTo({ center: [((c.lng - SPIN_DEG_PER_SEC * dt + 540) % 360) - 180, c.lat] });
+        map.jumpTo({ center: [((c.lng - SPIN_DEG_PER_SEC * dt + 540) % 360) - 180, c.lat] }, { spin: true });
         spinRaf = requestAnimationFrame(step);
     };
     spinRaf = requestAnimationFrame(step);
+    syncSpinButton();
 }
+function stopSpin() {
+    cancelAnimationFrame(spinRaf);
+    spinRaf = 0;
+    spinPending = false;
+    SPIN_STOP_EVENTS.forEach(t => document.removeEventListener(t, onIdleInput, true));
+    syncSpinButton();
+}
+
+async function startIdleSpin() {
+    const still = () => projection === 'globe' && !hasWork() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!still()) return;
+    await mapReady;
+    if (!still() || isSpinning()) return;
+    SPIN_STOP_EVENTS.forEach(t => document.addEventListener(t, onIdleInput, { capture: true, passive: true }));
+    runSpin();
+}
+
+// The button: whole globe upright first, then the spin (unless the user takes over meanwhile)
+function startSpin() {
+    if (projection !== 'globe') return;
+    stopSpin();
+    spinPending = true;
+    syncSpinButton();
+    const c = map.getCenter();
+    map.once('moveend', () => { if (spinPending) { spinPending = false; runSpin(); } });
+    map.easeTo({ center: [c.lng, Math.max(-30, Math.min(30, c.lat))], zoom: globeFitZoom(), bearing: 0, pitch: 0, duration: 800 });
+}
+
+// Any move that is not the spin stops it; while the globe is still easing into view, only the
+// user's own moves (they carry an originalEvent) cancel it.
+map.on('movestart', e => {
+    if (e.spin) return;
+    if (spinRaf || (spinPending && e.originalEvent)) stopSpin();
+});
+
+map.addControl({
+    onAdd() {
+        const wrap = document.createElement('div');
+        wrap.className = 'maplibregl-ctrl maplibregl-ctrl-group sf-spin-ctrl';
+        spinBtn = document.createElement('button');
+        spinBtn.type = 'button';
+        spinBtn.className = 'sf-spin-btn';
+        spinBtn.setAttribute('aria-label', 'Let it spin');
+        // a globe, and under it an arrow running left to right, the way its surface turns
+        spinBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+            '<circle cx="12" cy="10.5" r="6"/><ellipse cx="12" cy="10.5" rx="2.6" ry="6"/><path d="M6 10.5h12"/>' +
+            '<path d="M4 17.5c4.5 3.2 11.5 3.2 16 0"/><polyline points="16.5 17.8 20 17.5 18.5 20.7"/></svg>';
+        spinBtn.addEventListener('click', () => (isSpinning() ? stopSpin() : startSpin()));
+        wrap.appendChild(spinBtn);
+        syncSpinButton();
+        return wrap;
+    },
+    onRemove() {},
+}, 'top-left');
 
 function syncProjectionToggle() {
     document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
