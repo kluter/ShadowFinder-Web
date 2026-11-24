@@ -63,7 +63,7 @@ Without a photo, type **H** (object height) and **L** (shadow length) in any uni
 | Drag / scroll / right-drag | Move / zoom / rotate and tilt |
 | **Paste coordinates…** | Pin a place (formats below). The pin says which bands cover it |
 | Sun readout | Sun elevation from your H / L ratio, and the ring's radius |
-| **Centre on the ring** | Turn the map to where the sun stood straight overhead (UTC times only) |
+| **Centre on the ring** (top left of the map, above *Let it spin*) | Turn the map to where the sun stood straight overhead. Greyed out until there is a band with a UTC time |
 | **Selected / Overlap** | With two or more shadows: show only the selected shadow's band, or every band plus their overlap |
 | **Layers** | An opacity slider per band, for the overlap and for the day/night shade. Double-click a slider to reset it |
 | **Export** | The bands for Google Earth or GIS, see [export.md](export.md) |

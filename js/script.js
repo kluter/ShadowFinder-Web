@@ -231,25 +231,39 @@ function startSpin() {
 // Any move that is not the spin itself stops it
 map.on('movestart', e => { if (!e.spin && spinRaf) stopSpin(); });
 
-map.addControl({
-    onAdd() {
-        const wrap = document.createElement('div');
-        wrap.className = 'maplibregl-ctrl maplibregl-ctrl-group sf-spin-ctrl';
-        spinBtn = document.createElement('button');
-        spinBtn.type = 'button';
-        spinBtn.className = 'sf-spin-btn';
-        spinBtn.setAttribute('aria-label', 'Let it spin');
-        // a globe, and under it an arrow running left to right, the way its surface turns
-        spinBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-            '<circle cx="12" cy="10.5" r="6"/><ellipse cx="12" cy="10.5" rx="2.6" ry="6"/><path d="M6 10.5h12"/>' +
-            '<path d="M4 17.5c4.5 3.2 11.5 3.2 16 0"/><polyline points="16.5 17.8 20 17.5 18.5 20.7"/></svg>';
-        spinBtn.addEventListener('click', () => (isSpinning() ? stopSpin() : startSpin()));
-        wrap.appendChild(spinBtn);
-        syncSpinButton();
-        return wrap;
-    },
-    onRemove() {},
-}, 'top-left');
+// Top left of the map, two buttons of their own with a small gap (camera actions, as the compass
+// is on the right): Centre on the ring above Let it spin. Centre on the ring stays visible, greyed
+// out until there is a UTC band, like the other controls that cannot act yet; its state and click
+// are set further down (syncMapBarButtons, #btn-center). Let it spin hides in 2D.
+function mapButton(id, cls, label, svg) {
+    let btn;
+    map.addControl({
+        onAdd() {
+            const wrap = document.createElement('div');
+            wrap.className = `maplibregl-ctrl maplibregl-ctrl-group ${cls}-ctrl`;
+            btn = document.createElement('button');
+            btn.type = 'button';
+            if (id) btn.id = id;
+            btn.className = `sf-map-btn ${cls}`;
+            btn.setAttribute('aria-label', label);
+            btn.innerHTML = svg;
+            wrap.appendChild(btn);
+            return wrap;
+        },
+        onRemove() {},
+    }, 'top-left');
+    return btn;
+}
+mapButton('btn-center', 'sf-centre-btn', 'Centre on the ring',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>'
+).disabled = true;
+// a globe, and under it an arrow running left to right, the way its surface turns
+spinBtn = mapButton('', 'sf-spin-btn', 'Let it spin',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="12" cy="10.5" r="6"/><ellipse cx="12" cy="10.5" rx="2.6" ry="6"/><path d="M6 10.5h12"/>' +
+    '<path d="M4 17.5c4.5 3.2 11.5 3.2 16 0"/><polyline points="16.5 17.8 20 17.5 18.5 20.7"/></svg>');
+spinBtn.addEventListener('click', () => (isSpinning() ? stopSpin() : startSpin()));
+syncSpinButton();
 
 function syncProjectionToggle() {
     document.querySelectorAll('#projection-toggle .toggle-btn').forEach(b =>
@@ -1969,7 +1983,8 @@ function pulseBand(t) {
     const t0 = performance.now(), dur = 650;
     const step = now => {
         if (!map.getLayer(id)) return;   // its shadow was closed mid-pulse
-        const k = Math.sin(Math.min(1, (now - t0) / dur) * Math.PI);
+        // a frame's timestamp can lie just before t0: clamp, or k dips below 0 and MapLibre rejects it
+        const k = Math.sin(Math.min(1, Math.max(0, (now - t0) / dur)) * Math.PI);
         map.setPaintProperty(id, 'raster-opacity', base + (1 - base) * k);
         map.setPaintProperty(id, 'raster-brightness-min', 0.35 * k);
         if (now - t0 < dur) pulseRaf = requestAnimationFrame(step);

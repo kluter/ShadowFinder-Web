@@ -662,12 +662,15 @@ a.map-ctx-item { text-decoration: none; }
 .maplibregl-ctrl-group button.maplibregl-ctrl-compass:not(:disabled):hover { background-color: var(--accent-bg); }
 .maplibregl-ctrl-top-right .maplibregl-ctrl { margin: 10px 10px 0 0; }
 .maplibregl-ctrl-top-left .maplibregl-ctrl { margin: 10px 0 0 10px; }
-/* "Let it spin" (top left of the globe): lit while the globe turns; only on the globe */
-.sf-spin-btn { display: flex; align-items: center; justify-content: center; color: #aaa; }
-.sf-spin-btn svg { width: 18px; height: 18px; }
-.maplibregl-ctrl-group button.sf-spin-btn:not(:disabled):hover { background-color: var(--accent-bg); color: var(--accent); }
+/* Top left of the map: Centre on the ring above Let it spin (lit while the globe turns), each its own box */
+.maplibregl-ctrl-top-left .maplibregl-ctrl + .maplibregl-ctrl { margin-top: 6px; }
+.sf-map-btn { display: flex; align-items: center; justify-content: center; color: #aaa; }
+.sf-map-btn svg { width: 18px; height: 18px; }
+.sf-centre-btn svg { width: 16px; height: 16px; }
+.maplibregl-ctrl-group button.sf-map-btn:not(:disabled):hover { background-color: var(--accent-bg); color: var(--accent); }
+.maplibregl-ctrl-group button.sf-map-btn:disabled { color: #444; cursor: default; }
 .maplibregl-ctrl-group button.sf-spin-btn.active { background-color: var(--accent-bg); color: var(--accent); }
-#map-container:not(.space) .sf-spin-ctrl { display: none; }
+#map-container:not(.space) .sf-spin-btn-ctrl { display: none; }   /* spinning is for the globe */
 .maplibregl-ctrl-attrib.maplibregl-compact { background: #151515cc; color: #888; }
 .maplibregl-ctrl-attrib a { color: #aaa; }
 .maplibregl-canvas:focus { outline: none; }
