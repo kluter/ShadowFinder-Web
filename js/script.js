@@ -3127,5 +3127,10 @@ autosaveRestore().then(startIdleSpin);   // spins only when nothing was restored
 
 // Until the first band, the map shows the day and night of this moment; the terminator moves
 // 0.25° a minute, so a repaint each minute keeps it current (renderBands repaints only then).
+// In a background tab the browser slows or freezes timers, so coming back to the tab repaints at
+// once instead of waiting for the next tick.
+const refreshLiveDay = () => { if (!observations.length && !document.hidden) renderBands(); };
 renderBands();
-setInterval(() => { if (!observations.length && !document.hidden) renderBands(); }, 60000);
+setInterval(refreshLiveDay, 60000);
+document.addEventListener('visibilitychange', refreshLiveDay);
+window.addEventListener('pageshow', refreshLiveDay);   // restored from the back/forward cache
