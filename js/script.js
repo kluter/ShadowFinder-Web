@@ -169,8 +169,10 @@ mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoo
 // ---- SPIN ----
 // The globe turns slowly eastward, as the Earth does: seen from space with north up, the surface
 // drifts from left to right, so the view's centre moves west.
-// - Idle: while the app is just open and untouched. The first click, key, scroll, paste or drop
-//   anywhere stops it. Not with a restored session, nor in 2D, nor with reduced motion.
+// - Idle: while the app is just open and the globe untouched. Only the globe itself stops it (a
+//   press, scroll or key on the map, or any move of it), or the first calculated band. Typing in
+//   the panel, the date picker, dropping a photo and the like leave it turning. Not with a
+//   restored session, nor in 2D, nor with reduced motion.
 // - "Let it spin" button (top left of the globe): whenever you like, from the view as you left it
 //   (zoom, tilt, bearing and latitude stay). The button again, or any move of the map that is not
 //   the spin itself (a drag, a zoom, the compass, a flight to a band or a pin), stops it.
@@ -178,8 +180,8 @@ mapReady.then(() => { if (projection === 'globe') map.jumpTo({ zoom: globeFitZoo
 // Zoomed in, the turn slows in step with the zoom, so the surface crosses the screen about as fast
 // as on the whole globe instead of racing past.
 const SPIN_DEG_PER_SEC = 3;   // on the whole globe: one turn in two minutes
-const SPIN_STOP_EVENTS = ['pointerdown', 'keydown', 'wheel', 'paste', 'drop'];
-let spinRaf = 0, spinBtn = null;
+const SPIN_STOP_EVENTS = ['pointerdown', 'keydown', 'wheel'];
+let spinRaf = 0, spinBtn = null, idleSpin = false;
 
 const isSpinning = () => !!spinRaf;
 function syncSpinButton() {
@@ -189,8 +191,10 @@ function syncSpinButton() {
     spinBtn.setAttribute('aria-pressed', String(on));
     spinBtn.title = on ? 'Stop the globe' : 'Let it spin: the globe turns like the Earth';
 }
-// Idle-spin stop: anything the user does, except pressing the spin button (its click decides)
-function onIdleInput(e) { if (!e.target.closest?.('.sf-spin-btn')) stopSpin(); }
+// Idle-spin stop: a touch of the globe itself (its canvas, or a key while the map has focus). The
+// map's own buttons are left to their click: a zoom or the compass moves the map, which stops it,
+// and the spin button decides for itself.
+function onIdleInput(e) { if (e.target.closest?.('.maplibregl-canvas-container')) stopSpin(); }
 
 function runSpin() {
     let last = performance.now();
@@ -208,6 +212,7 @@ function runSpin() {
 function stopSpin() {
     cancelAnimationFrame(spinRaf);
     spinRaf = 0;
+    idleSpin = false;
     SPIN_STOP_EVENTS.forEach(t => document.removeEventListener(t, onIdleInput, true));
     syncSpinButton();
 }
@@ -219,6 +224,7 @@ async function startIdleSpin() {
     if (!still() || isSpinning()) return;
     SPIN_STOP_EVENTS.forEach(t => document.addEventListener(t, onIdleInput, { capture: true, passive: true }));
     runSpin();
+    idleSpin = true;
 }
 
 // The button: the spin starts from the view as it is
@@ -1616,6 +1622,7 @@ async function calculateTab(t) {
             baseEpochMs, mode: t.mode, h: m.h, s: m.s, grid,
         } : null;
         syncObservations();
+        if (count && idleSpin) stopSpin();   // the first band ends the idle spin
         await renderBands();
         if (count) {
             // The first result of a tab turns the map: to the overlap once there are two or more
